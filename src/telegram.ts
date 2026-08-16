@@ -172,7 +172,7 @@ export class TelegramClient {
       type: "quiz",
       is_anonymous: false,
       allows_revoting: true,
-      correct_option_ids: [quiz.correctOption],
+      correct_option_id: quiz.correctOption,
       explanation: quiz.explanation,
       ...(options.replyToMessageId
         ? {

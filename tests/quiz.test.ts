@@ -43,12 +43,12 @@ describe("parseQuizInput", () => {
     expect(parsed.countWasSpecified).toBe(true);
   });
 
-  it("accepts 1 to 50 questions and rejects larger requests", () => {
-    expect(parseQuizInput("/quiz 1 easy English", 8, 50).options.count).toBe(1);
-    expect(parseQuizInput("/quiz 50 hard Hindi", 8, 50).options.count).toBe(50);
+  it("accepts 1 to 100 questions and rejects larger requests", () => {
+    expect(parseQuizInput("/quiz 1 easy English", 8, 100).options.count).toBe(1);
+    expect(parseQuizInput("/quiz 100 hard Hindi", 8, 100).options.count).toBe(100);
 
-    const parsed = parseQuizInput("/quiz 99 hard Hindi", 8, 50);
-    expect(parsed.error).toContain("between 1 and 50");
+    const parsed = parseQuizInput("/quiz 101 hard Hindi", 8, 100);
+    expect(parsed.error).toContain("between 1 and 100");
   });
 
   it("rejects duplicate count and difficulty controls", () => {
@@ -116,17 +116,17 @@ D) NaCl
     });
   });
 
-  it("accepts all 50 complete questions in one message", () => {
-    const result = parsePastedQuiz(makePastedQuiz(50), 50);
+  it("accepts all 100 complete questions in one message", () => {
+    const result = parsePastedQuiz(makePastedQuiz(100), 100);
     expect(result.error).toBeUndefined();
-    expect(result.quizSet?.quizzes).toHaveLength(50);
+    expect(result.quizSet?.quizzes).toHaveLength(100);
   });
 
-  it("returns a clear error when a pasted quiz exceeds 50 questions", () => {
-    const result = parsePastedQuiz(makePastedQuiz(51), 50);
+  it("returns a clear error when a pasted quiz exceeds 100 questions", () => {
+    const result = parsePastedQuiz(makePastedQuiz(101), 100);
     expect(result.quizSet).toBeUndefined();
-    expect(result.error).toContain("maximum of 50");
-    expect(result.error).toContain("contains 51");
+    expect(result.error).toContain("maximum of 100");
+    expect(result.error).toContain("contains 101");
   });
 
   it("uses the AI fallback for incomplete or invalid MCQ blocks", () => {

@@ -39,7 +39,7 @@ export const getConfig = (): AppConfig => {
     );
   }
 
-  const maxQuizCount = readInteger("MAX_QUIZ_COUNT", 50, 1, 50);
+  const maxQuizCount = readInteger("MAX_QUIZ_COUNT", 50, 1, 100);
   const defaultQuizCount = readInteger(
     "DEFAULT_QUIZ_COUNT",
     8,
@@ -51,7 +51,7 @@ export const getConfig = (): AppConfig => {
     telegramToken: required("TELEGRAM_BOT_TOKEN"),
     webhookSecret,
     geminiApiKey: required("GEMINI_API_KEY"),
-    geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite",
+    geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash-lite",
     defaultQuizCount,
     maxQuizCount,
     maxPdfBytes: readInteger(
@@ -68,5 +68,5 @@ export const configurationStatus = () => ({
   telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
   webhookSecret: Boolean(process.env.TELEGRAM_WEBHOOK_SECRET?.trim()),
   gemini: Boolean(process.env.GEMINI_API_KEY?.trim()),
-  model: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite",
+  model: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash-lite",
 });

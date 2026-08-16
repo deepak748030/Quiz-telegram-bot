@@ -19,17 +19,17 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 
 - **Node.js 22.x** (LTS), the runtime used by the Render web service.
 - **TypeScript 5.9.3**, compiled to `dist/` by the `build` script.
-- **Gemini `gemini-3.5-flash-lite`**, the latest stable Gemini Flash-Lite model with free-tier input and output. It supports PDF input, a 1,048,576-token input window, and structured output.
+- **Gemini `gemini-2.0-flash-lite`**, a fast Gemini Flash-Lite model with free-tier input and output. It supports PDF input, a 1,048,576-token input window, and structured output.
 - **`@google/genai`**, Google's current JavaScript SDK (not the deprecated `@google/generative-ai` package).
 - **A persistent Node HTTP server** (`src/server.ts`) that exposes the `/webhook` endpoint and a small landing page.
 - **Telegram Bot API** native quiz polls.
 
-Gemini 3.7 Flash is newer and more capable overall, but its API does **not** currently have a free tier. This project therefore defaults to 3.5 Flash-Lite. You can change `GEMINI_MODEL` at any time without changing code.
+You can change `GEMINI_MODEL` at any time without changing code. Use `/model` in Telegram to list all models available to your API key.
 
 Official references:
 
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
-- [Gemini 3.5 Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)
+- [Gemini Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-2.0-flash-lite)
 - [Gemini PDF understanding](https://ai.google.dev/gemini-api/docs/document-processing)
 - [Telegram Bot API — sendPoll](https://core.telegram.org/bots/api#sendpoll)
 - [Render Node.js runtime](https://render.com/docs/node-version)
@@ -98,9 +98,9 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Random secret generated above |
 | `GEMINI_API_KEY` | Yes | Key from AI Studio |
-| `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite` |
+| `GEMINI_MODEL` | No | Defaults to `gemini-2.0-flash-lite` |
 | `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
-| `MAX_QUIZ_COUNT` | No | Defaults/maxes at `50` |
+| `MAX_QUIZ_COUNT` | No | Defaults to `50`, max `100` |
 | `MAX_PDF_BYTES` | No | Defaults to `20000000` |
 | `POLL_DELAY_MS` | No | Defaults to `1000` to respect Telegram limits |
 
@@ -195,7 +195,7 @@ All parts are optional. Examples:
 /quiz 8 mixed auto
 ```
 
-Commands: `/start`, `/help`, `/quiz`, `/model`, `/apikey`.
+Commands: `/start`, `/help`, `/quiz [1-100] [easy|medium|hard|mixed] [language]`, `/model`, `/apikey`.
 
 ### Personal Gemini key and model
 
@@ -232,7 +232,7 @@ Telegram requires a public HTTPS webhook, so use a secure tunnel only for local 
 
 - **PDF size:** Telegram's hosted Bot API allows bots to download files up to 20 MB. Gemini itself can accept larger PDFs, but Telegram is the bottleneck here.
 - **PDF type:** Password-protected, corrupted, or fake `.pdf` files are rejected or may fail processing.
-- **Quiz count:** Minimum 1 and capped at 50. Polls are paced to stay within Telegram's per-chat messaging limits.
+- **Quiz count:** Minimum 1 and capped at 100. Polls are paced to stay within Telegram's per-chat messaging limits.
 - **Rate limits:** “Free” does not mean unlimited. Gemini and Render apply free-tier quotas. Telegram also recommends no more than roughly one message per second in one chat, which is why poll sending is paced.
 - **Data handling:** The app does not store user content in a database. It downloads each PDF into memory, sends the source to Gemini, sends polls to Telegram, and then the task ends. Google states on its pricing page that free-tier content may be used to improve its products. Do not send sensitive documents unless that policy is acceptable.
 - **Reliability:** The server acknowledges the webhook and finishes quiz generation in the background. If a provider is unavailable, the user receives an error where possible; no durable job queue is included.

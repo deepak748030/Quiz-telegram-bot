@@ -129,6 +129,9 @@ const safeErrorMessage = (error: unknown, usesPersonalKey = false): string => {
       ? "Your Gemini API key was rejected. Update it in private with /apikey YOUR_KEY."
       : "The bot’s AI service is not configured correctly. Please contact the bot owner.";
   }
+  if (normalized.includes("invalid argument") || normalized.includes("not found") || normalized.includes("model not supported")) {
+    return "The selected Gemini model is not available or doesn't support quiz generation. Use /model to pick a different one, or check the GEMINI_MODEL environment variable.";
+  }
   return "I couldn’t create this quiz. Please try a clearer source or a smaller PDF.";
 };
 
@@ -189,47 +192,69 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
   const callback = update.callback_query;
 
   if (callback) {
-    const callbackMessage = callback.message;
-    const settings = getUserAISettings(callback.from.id);
-    const models = settings.availableModels;
-    if (!callbackMessage || !models || models.length === 0) {
-      await telegram.answerCallbackQuery(
-        callback.id,
-        "This model list expired. Send /model again.",
-        true,
-      );
-      return;
-    }
-
-    const modelMatch = callback.data?.match(/^model:(\d+)$/);
-    const pageMatch = callback.data?.match(/^models:(\d+)$/);
-    let page = pageMatch ? Number(pageMatch[1]) : 0;
-    if (modelMatch) {
-      const index = Number(modelMatch[1]);
-      const model = models[index];
-      if (!model) {
-        await telegram.answerCallbackQuery(callback.id, "That model is no longer available.", true);
+    try {
+      const callbackMessage = callback.message;
+      const settings = getUserAISettings(callback.from.id);
+      const models = settings.availableModels;
+      if (!callbackMessage || !models || models.length === 0) {
+        await telegram.answerCallbackQuery(
+          callback.id,
+          "This model list expired. Send /model again.",
+          true,
+        );
         return;
       }
-      setUserModel(callback.from.id, model);
-      page = Math.floor(index / MODEL_PAGE_SIZE);
-      await telegram.answerCallbackQuery(callback.id, `Selected ${model}`);
-    } else if (pageMatch) {
-      await telegram.answerCallbackQuery(callback.id);
-    } else {
-      await telegram.answerCallbackQuery(callback.id, "Unknown selection.", true);
-      return;
-    }
 
-    const selectedModel = getUserAISettings(callback.from.id).model ?? config.geminiModel;
-    const menu = modelMenu(models, selectedModel, page);
-    await telegram.editMessage(
-      callbackMessage.chat.id,
-      callbackMessage.message_id,
-      menu.text,
-      "HTML",
-      menu.markup,
-    );
+      const modelMatch = callback.data?.match(/^model:(\d+)$/);
+      const pageMatch = callback.data?.match(/^models:(\d+)$/);
+      let page = pageMatch ? Number(pageMatch[1]) : 0;
+      if (modelMatch) {
+        const index = Number(modelMatch[1]);
+        const model = models[index];
+        if (!model) {
+          await telegram.answerCallbackQuery(callback.id, "That model is no longer available.", true);
+          return;
+        }
+        setUserModel(callback.from.id, model);
+        page = Math.floor(index / MODEL_PAGE_SIZE);
+        await telegram.answerCallbackQuery(callback.id, `Selected ${model}`);
+      } else if (pageMatch) {
+        await telegram.answerCallbackQuery(callback.id);
+      } else {
+        await telegram.answerCallbackQuery(callback.id, "Unknown selection.", true);
+        return;
+      }
+
+      const selectedModel = getUserAISettings(callback.from.id).model ?? config.geminiModel;
+      const menu = modelMenu(models, selectedModel, page);
+      try {
+        await telegram.editMessage(
+          callbackMessage.chat.id,
+          callbackMessage.message_id,
+          menu.text,
+          "HTML",
+          menu.markup,
+        );
+      } catch (editError) {
+        // Telegram returns 400 "message is not modified" when the content is
+        // the same — that is harmless. Silently ignore it.
+        const msg = editError instanceof Error ? editError.message.toLowerCase() : "";
+        if (!msg.includes("message is not modified")) {
+          logError(`Callback edit failed for user ${callback.from.id}:`, editError);
+        }
+      }
+    } catch (callbackError) {
+      logError(`Callback query ${callback.id} failed:`, callbackError);
+      try {
+        await telegram.answerCallbackQuery(
+          callback.id,
+          "Something went wrong. Please try again.",
+          true,
+        );
+      } catch {
+        // Best-effort; nothing more we can do.
+      }
+    }
     return;
   }
 
