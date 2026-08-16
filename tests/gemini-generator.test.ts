@@ -46,7 +46,7 @@ describe("GeminiQuizGenerator", () => {
   it("sends source text without model-specific PDF inline data", async () => {
     generateContentMock.mockResolvedValue({ text: validResponseText });
 
-    const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash-lite");
+    const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash");
     await generator.generate(
       { kind: "text", text: "Text extracted locally from an uploaded PDF." },
       baseOptions,
@@ -57,7 +57,7 @@ describe("GeminiQuizGenerator", () => {
       model: string;
       contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
     };
-    expect(request.model).toBe("gemini-2.5-flash-lite");
+    expect(request.model).toBe("gemini-2.5-flash");
     expect(request.contents[0]?.parts).not.toContainEqual(
       expect.objectContaining({ inlineData: expect.anything() }),
     );
@@ -68,7 +68,7 @@ describe("GeminiQuizGenerator", () => {
     );
   });
 
-  it("migrates a retired gemini-2.0-flash model to gemini-2.5-flash-lite", async () => {
+  it("migrates a retired gemini-2.0-flash model to gemini-2.5-flash", async () => {
     generateContentMock.mockResolvedValue({ text: validResponseText });
 
     const generator = new GeminiQuizGenerator("key", "gemini-2.0-flash");
@@ -78,7 +78,20 @@ describe("GeminiQuizGenerator", () => {
     );
 
     const request = generateContentMock.mock.calls[0]?.[0] as { model: string };
-    expect(request.model).toBe("gemini-2.5-flash-lite");
+    expect(request.model).toBe("gemini-2.5-flash");
+  });
+
+  it("migrates the removed gemini-2.5-flash-lite model to gemini-2.5-flash", async () => {
+    generateContentMock.mockResolvedValue({ text: validResponseText });
+
+    const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash-lite");
+    await generator.generate(
+      { kind: "text", text: "Some study material to turn into a quiz." },
+      baseOptions,
+    );
+
+    const request = generateContentMock.mock.calls[0]?.[0] as { model: string };
+    expect(request.model).toBe("gemini-2.5-flash");
   });
 
   it("surfaces a Gemini API error to the caller", async () => {
@@ -96,7 +109,7 @@ describe("GeminiQuizGenerator", () => {
     );
     generateContentMock.mockRejectedValue(apiError);
 
-    const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash-lite");
+    const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash");
     await expect(
       generator.generate({ kind: "text", text: "Extracted PDF text" }, baseOptions),
     ).rejects.toBe(apiError);

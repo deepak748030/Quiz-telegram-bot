@@ -1,3 +1,5 @@
+import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from "./gemini-model.js";
+
 export interface AppConfig {
   telegramToken: string;
   webhookSecret: string;
@@ -34,11 +36,11 @@ const required = (name: string): string => {
 };
 
 const configuredGeminiModel = (): string => {
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash-lite";
-  // Keep old Render deployments working after Google's 1 June 2026 shutdown.
-  return /^gemini-2\.0-flash(?:-lite)?(?:-001)?$/i.test(model)
-    ? "gemini-2.5-flash-lite"
-    : model;
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  // Keep old deployments working: Google shut down 2.0 Flash on 1 June 2026
+  // and later removed 2.5 Flash-Lite for new API keys, so migrate both to the
+  // current default instead of failing every text/PDF request.
+  return resolveGeminiModel(model);
 };
 
 export const getConfig = (): AppConfig => {

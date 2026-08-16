@@ -20,7 +20,7 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 
 - **Node.js 22.x** (LTS), the runtime used by the Render web service.
 - **TypeScript 5.9.3**, compiled to `dist/` by the `build` script.
-- **Gemini `gemini-2.5-flash-lite`**, the current stable Flash-Lite model with a 1,048,576-token input window and structured output. (Gemini 2.0 Flash-Lite was shut down on 1 June 2026.)
+- **Gemini `gemini-2.5-flash`**, the current stable Flash model with a 1,048,576-token input window and structured JSON output. (Gemini 2.0 Flash-Lite was shut down on 1 June 2026, and 2.5 Flash-Lite was later removed for new API keys.)
 - **`@google/genai`**, Google's current JavaScript SDK (not the deprecated `@google/generative-ai` package).
 - **`unpdf`**, a serverless-friendly PDF.js wrapper used to extract embedded text before the Gemini request.
 - **A persistent Node HTTP server** (`src/server.ts`) that exposes the `/webhook` endpoint and a small landing page.
@@ -31,7 +31,7 @@ You can change `GEMINI_MODEL` at any time without changing code. Use `/model` in
 Official references:
 
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
-- [Gemini Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite)
+- [Gemini Flash model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash)
 - [`unpdf` PDF text extraction](https://www.npmjs.com/package/unpdf)
 - [Telegram Bot API — sendPoll](https://core.telegram.org/bots/api#sendpoll)
 - [Render Node.js runtime](https://render.com/docs/node-version)
@@ -101,7 +101,7 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Random secret generated above |
 | `GEMINI_API_KEY` | Yes | Key from AI Studio |
-| `GEMINI_MODEL` | No | Defaults to `gemini-2.5-flash-lite` |
+| `GEMINI_MODEL` | No | Defaults to `gemini-2.5-flash` |
 | `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
 | `MAX_QUIZ_COUNT` | No | Defaults to `50`, max `100` |
 | `MAX_PDF_BYTES` | No | Defaults to `20000000` (Telegram's download ceiling) |

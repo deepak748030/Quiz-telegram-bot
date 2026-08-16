@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
+import { resolveGeminiModel } from "./gemini-model.js";
 import { buildQuizPrompt, sanitizeQuizSet } from "./quiz.js";
 import type {
   QuizRequestOptions,
@@ -133,12 +134,11 @@ export class GeminiQuizGenerator {
 
   constructor(apiKey: string, model: string) {
     this.#client = new GoogleGenAI({ apiKey });
-    // Gemini 2.0 Flash/Flash-Lite were shut down on 1 June 2026. Silently
-    // migrate old deployments whose Render environment still names either
-    // retired model, instead of failing every text and PDF request.
-    this.#model = /^gemini-2\.0-flash(?:-lite)?(?:-001)?$/i.test(model.trim())
-      ? "gemini-2.5-flash-lite"
-      : model;
+    // Gemini 2.0 Flash/Flash-Lite were shut down on 1 June 2026, and 2.5
+    // Flash-Lite was later removed for new API keys. Silently migrate any
+    // retired model to the current default instead of failing every text and
+    // PDF request.
+    this.#model = resolveGeminiModel(model);
   }
 
   async generate(
@@ -174,9 +174,9 @@ export class GeminiQuizGenerator {
               minimumOutputCount,
               maximumOutputCount,
             ),
-            // The current stable 2.5 Flash-Lite model supports a 65,536-token
-            // output. A larger cap prevents long PDF/question-set responses
-            // from being cut off halfway through their JSON.
+            // Gemini 2.5 Flash supports a 65,536-token output. A larger cap
+            // prevents long PDF/question-set responses from being cut off
+            // halfway through their JSON.
             maxOutputTokens: Math.min(
               Math.max(4_096, maximumOutputCount * 500),
               32_768,
