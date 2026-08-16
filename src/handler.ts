@@ -1,5 +1,6 @@
 import { getConfig } from "./config.js";
 import { GeminiQuizGenerator, listGeminiModels } from "./gemini.js";
+import { extractPdfText, PdfExtractionError } from "./pdf.js";
 import { parsePastedQuiz, parseQuizInput } from "./quiz.js";
 import { delay, formatBytes, TelegramClient } from "./telegram.js";
 import {
@@ -144,6 +145,8 @@ const safeErrorMessage = (
   usesPersonalKey = false,
   wasPdf = false,
 ): string => {
+  if (error instanceof PdfExtractionError) return error.message;
+
   const message = error instanceof Error ? error.message : String(error);
   const status =
     error && typeof error === "object" && "status" in error
@@ -166,7 +169,7 @@ const safeErrorMessage = (
     normalized.includes("request entity too large")
   ) {
     return wasPdf
-      ? `That PDF is too large for the AI service to process inline.${hint} Try a smaller PDF (a few MB or less), or paste the text directly.`
+      ? `The text extracted from this PDF is too large for the AI service to process at once.${hint} Split the PDF into smaller parts or paste a shorter section.`
       : `That request is too large for the AI service to process at once.${hint}`;
   }
   if (
@@ -202,7 +205,7 @@ const safeErrorMessage = (
   }
   if (normalized.includes("invalid argument") || normalized.includes("invalid value")) {
     return wasPdf
-      ? `Gemini rejected this PDF's content or format.${hint} Try a text-based (not scanned) PDF or a smaller file, or paste the text directly. You can also switch models with /model.`
+      ? `Gemini could not process the text extracted from this PDF.${hint} Try a smaller PDF or choose another model with /model.`
       : `Gemini could not process this request.${hint} Please retry, or choose another model with /model.`;
   }
   if (
@@ -234,7 +237,7 @@ const safeErrorMessage = (
   // Fallback: surface the real error so the user (and support) can act on it
   // instead of guessing from a generic message.
   return wasPdf
-    ? `I couldn't create a quiz from this PDF.${hint} Try a smaller or text-based PDF, paste the text directly, or use /model to switch models.`
+    ? `I couldn't create a quiz from the extracted PDF text.${hint} Try a smaller PDF, paste the text directly, or use /model to switch models.`
     : `I couldn't create this quiz.${hint} Please retry or choose another model with /model.`;
 };
 
@@ -604,10 +607,19 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
           message.document.file_id,
           config.maxPdfBytes,
         );
-        if (!hasPdfSignature(bytes)) throw new Error("Document is not a valid PDF.");
+        if (!hasPdfSignature(bytes)) {
+          throw new PdfExtractionError(
+            "INVALID_PDF",
+            "This file is not a valid PDF. Export it as a new PDF and try again.",
+          );
+        }
+        const extracted = await extractPdfText(bytes, {
+          maxPages: config.maxPdfPages,
+          maxCharacters: config.maxPdfTextCharacters,
+        });
         source = {
-          kind: "pdf",
-          data: bytes,
+          kind: "text",
+          text: extracted.text,
         };
       } else {
         source = { kind: "text", text: request.sourceText };

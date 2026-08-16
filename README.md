@@ -5,6 +5,7 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 ## What it does
 
 - Accepts normal Telegram text messages and PDFs.
+- Extracts embedded PDF text locally with `unpdf` and sends ordinary text to Gemini, so the selected model does **not** need native PDF-input support.
 - Creates 1–50 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
 - Supports easy, medium, hard, and mixed difficulty.
 - Uses Gemini structured JSON output, then validates every question against Telegram limits.
@@ -19,8 +20,9 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 
 - **Node.js 22.x** (LTS), the runtime used by the Render web service.
 - **TypeScript 5.9.3**, compiled to `dist/` by the `build` script.
-- **Gemini `gemini-2.5-flash-lite`**, the current stable Flash-Lite model with PDF input, a 1,048,576-token input window, and structured output. (Gemini 2.0 Flash-Lite was shut down on 1 June 2026.)
+- **Gemini `gemini-2.5-flash-lite`**, the current stable Flash-Lite model with a 1,048,576-token input window and structured output. (Gemini 2.0 Flash-Lite was shut down on 1 June 2026.)
 - **`@google/genai`**, Google's current JavaScript SDK (not the deprecated `@google/generative-ai` package).
+- **`unpdf`**, a serverless-friendly PDF.js wrapper used to extract embedded text before the Gemini request.
 - **A persistent Node HTTP server** (`src/server.ts`) that exposes the `/webhook` endpoint and a small landing page.
 - **Telegram Bot API** native quiz polls.
 
@@ -30,7 +32,7 @@ Official references:
 
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
 - [Gemini Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite)
-- [Gemini PDF understanding](https://ai.google.dev/gemini-api/docs/document-processing)
+- [`unpdf` PDF text extraction](https://www.npmjs.com/package/unpdf)
 - [Telegram Bot API — sendPoll](https://core.telegram.org/bots/api#sendpoll)
 - [Render Node.js runtime](https://render.com/docs/node-version)
 - [Telegram webhooks](https://core.telegram.org/bots/api#setwebhook)
@@ -42,7 +44,8 @@ src/server.ts                  Persistent HTTP server (Render entry point)
 src/webhook-handler.ts         Shared webhook request handling (used by server + optional Vercel entry)
 api/webhook.ts                 Optional Vercel serverless entry point
 src/config.ts                  Validated environment configuration
-src/gemini.ts                  Structured Gemini text/PDF generation
+src/gemini.ts                  Structured Gemini text generation
+src/pdf.ts                     Safe local PDF-to-text extraction
 src/handler.ts                 Commands and end-to-end update processing
 src/quiz.ts                    Command parsing and Telegram-safe validation
 src/telegram.ts                Telegram API client, file download, retries
@@ -101,7 +104,9 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `GEMINI_MODEL` | No | Defaults to `gemini-2.5-flash-lite` |
 | `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
 | `MAX_QUIZ_COUNT` | No | Defaults to `50`, max `100` |
-| `MAX_PDF_BYTES` | No | Defaults to `20000000` |
+| `MAX_PDF_BYTES` | No | Defaults to `20000000` (Telegram's download ceiling) |
+| `MAX_PDF_PAGES` | No | Defaults to `500`; limits untrusted PDF parser work |
+| `MAX_PDF_TEXT_CHARACTERS` | No | Defaults to `500000`; bounds the text sent to Gemini |
 | `POLL_DELAY_MS` | No | Defaults to `1000` to respect Telegram limits |
 
 5. Deploy and copy the production URL, for example `https://quiz-forge.onrender.com`.
@@ -230,11 +235,12 @@ Telegram requires a public HTTPS webhook, so use a secure tunnel only for local 
 
 ## Limits and privacy
 
-- **PDF size:** Telegram's hosted Bot API allows bots to download files up to 20 MB. Gemini itself can accept larger PDFs, but Telegram is the bottleneck here.
-- **PDF type:** Password-protected, corrupted, or fake `.pdf` files are rejected or may fail processing.
+- **PDF processing:** PDFs are parsed inside the bot with `unpdf`; only extracted plain text is sent to Gemini. This removes the requirement for the chosen model to accept `application/pdf` input.
+- **PDF limits:** Telegram downloads are capped at 20 MB. Parsing defaults to at most 500 pages and 500,000 extracted characters; both parser limits are configurable.
+- **PDF type:** Password-protected, corrupted, and fake `.pdf` files are rejected. Scanned/image-only PDFs have no embedded text, so they must be made searchable with OCR before upload.
 - **Quiz count:** Minimum 1 and capped at 100. Polls are paced to stay within Telegram's per-chat messaging limits.
 - **Rate limits:** “Free” does not mean unlimited. Gemini and Render apply free-tier quotas. Telegram also recommends no more than roughly one message per second in one chat, which is why poll sending is paced.
-- **Data handling:** The app does not store user content in a database. It downloads each PDF into memory, sends the source to Gemini, sends polls to Telegram, and then the task ends. Google states on its pricing page that free-tier content may be used to improve its products. Do not send sensitive documents unless that policy is acceptable.
+- **Data handling:** The app does not store user content in a database. It downloads each PDF into memory, extracts its text locally, sends that extracted text to Gemini, sends polls to Telegram, and then releases the parser resources. Google states on its pricing page that free-tier content may be used to improve its products. Do not send sensitive documents unless that policy is acceptable.
 - **Reliability:** The server acknowledges the webhook and finishes quiz generation in the background. If a provider is unavailable, the user receives an error where possible; no durable job queue is included.
 
 ## Troubleshooting

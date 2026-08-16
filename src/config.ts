@@ -6,6 +6,8 @@ export interface AppConfig {
   defaultQuizCount: number;
   maxQuizCount: number;
   maxPdfBytes: number;
+  maxPdfPages: number;
+  maxPdfTextCharacters: number;
   pollDelayMs: number;
 }
 
@@ -67,6 +69,14 @@ export const getConfig = (): AppConfig => {
       20_000_000,
       100_000,
       20_000_000,
+    ),
+    // Bound untrusted PDF parsing and the amount of extracted text sent to AI.
+    maxPdfPages: readInteger("MAX_PDF_PAGES", 500, 1, 2_000),
+    maxPdfTextCharacters: readInteger(
+      "MAX_PDF_TEXT_CHARACTERS",
+      500_000,
+      10_000,
+      2_000_000,
     ),
     pollDelayMs: readInteger("POLL_DELAY_MS", 1_000, 250, 2_000),
   };

@@ -4,7 +4,7 @@ import { clearAllUserAISettings, getUserAISettings } from "../src/user-settings.
 
 // Mocks are declared with vi.hoisted so they exist before the mocked modules
 // are imported (vi.mock factories run during import resolution).
-const { telegramMocks, geminiMocks } = vi.hoisted(() => {
+const { telegramMocks, geminiMocks, pdfMocks } = vi.hoisted(() => {
   const telegramInstance = () => ({
     answerCallbackQuery: vi.fn().mockResolvedValue(true),
     editMessage: vi
@@ -25,6 +25,7 @@ const { telegramMocks, geminiMocks } = vi.hoisted(() => {
   return {
     telegramMocks: telegramInstance(),
     geminiMocks: { listGeminiModels: vi.fn(), generate: vi.fn() },
+    pdfMocks: { extractPdfText: vi.fn() },
   };
 });
 
@@ -42,6 +43,14 @@ vi.mock("../src/gemini.js", () => ({
     return { generate: (...args: unknown[]) => geminiMocks.generate(...args) };
   }),
 }));
+
+vi.mock("../src/pdf.js", () => {
+  class PdfExtractionError extends Error {}
+  return {
+    PdfExtractionError,
+    extractPdfText: (...args: unknown[]) => pdfMocks.extractPdfText(...args),
+  };
+});
 
 const { handleUpdate } = await import("../src/handler.js");
 
@@ -71,6 +80,10 @@ beforeEach(() => {
     "gemini-b",
     "gemini-c",
   ]);
+  pdfMocks.extractPdfText.mockResolvedValue({
+    text: "Text extracted locally from the uploaded PDF for quiz generation.",
+    totalPages: 1,
+  });
 });
 
 afterEach(() => {
@@ -195,6 +208,14 @@ describe("handleUpdate — PDF quiz errors surface the real cause", () => {
       },
     });
 
+    expect(pdfMocks.extractPdfText).toHaveBeenCalledOnce();
+    expect(geminiMocks.generate).toHaveBeenCalledWith(
+      {
+        kind: "text",
+        text: "Text extracted locally from the uploaded PDF for quiz generation.",
+      },
+      expect.any(Object),
+    );
     const failureText = telegramMocks.editMessage.mock.calls
       .map((call) => call[2])
       .find((text) => typeof text === "string" && text.includes("Quiz creation failed"));

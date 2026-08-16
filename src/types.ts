@@ -114,6 +114,4 @@ export interface QuizSet {
   quizzes: Quiz[];
 }
 
-export type QuizSource =
-  | { kind: "text"; text: string }
-  | { kind: "pdf"; data: Uint8Array };
+export type QuizSource = { kind: "text"; text: string };
