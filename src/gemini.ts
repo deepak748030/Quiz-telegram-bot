@@ -180,11 +180,13 @@ export class GeminiQuizGenerator {
               minimumOutputCount,
               maximumOutputCount,
             ),
-            // Larger requests (up to 50 questions) need more room for the
-            // structured JSON response than the old 15-question limit did.
+            // Free-tier Flash models have an 8,192-token output limit. Cap at
+            // that bound — Pro models with billing can go higher, but the
+            // default targets free-tier availability. 8,192 tokens fit
+            // roughly 100 compact JSON quiz questions.
             maxOutputTokens: Math.min(
-              32_768,
-              Math.max(8_192, maximumOutputCount * 512),
+              Math.max(4_096, maximumOutputCount * 500),
+              8_192,
             ),
             temperature: 0.45,
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },

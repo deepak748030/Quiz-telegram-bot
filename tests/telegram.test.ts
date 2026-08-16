@@ -44,7 +44,7 @@ describe("TelegramClient.sendQuiz", () => {
       type: "quiz",
       is_anonymous: false,
       allows_revoting: true,
-      correct_option_ids: [1],
+      correct_option_id: 1,
       explanation: quiz.explanation,
       message_thread_id: 7,
       reply_parameters: {

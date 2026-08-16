@@ -19,15 +19,15 @@ describe("quiz count configuration", () => {
     expect(config.maxQuizCount).toBe(50);
   });
 
-  it("allows MAX_QUIZ_COUNT=50 but rejects values above it", () => {
+  it("allows MAX_QUIZ_COUNT up to 100 but rejects values above it", () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-token");
     vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "test-secret");
     vi.stubEnv("GEMINI_API_KEY", "test-key");
-    vi.stubEnv("MAX_QUIZ_COUNT", "50");
+    vi.stubEnv("MAX_QUIZ_COUNT", "100");
 
-    expect(getConfig().maxQuizCount).toBe(50);
+    expect(getConfig().maxQuizCount).toBe(100);
 
-    vi.stubEnv("MAX_QUIZ_COUNT", "51");
-    expect(() => getConfig()).toThrow("MAX_QUIZ_COUNT must be an integer from 1 to 50");
+    vi.stubEnv("MAX_QUIZ_COUNT", "101");
+    expect(() => getConfig()).toThrow("MAX_QUIZ_COUNT must be an integer from 1 to 100");
   });
 });
