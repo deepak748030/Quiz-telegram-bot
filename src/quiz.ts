@@ -18,8 +18,42 @@ export interface ParsedQuizInput {
   isQuizCommand: boolean;
   options: QuizRequestOptions;
   sourceText: string;
+  /** True only when the user supplied an explicit numeric command option. */
+  countWasSpecified?: boolean;
   error?: string;
 }
+
+export interface ParsedPastedQuiz {
+  /** Numbered question blocks found in the message. */
+  detectedCount: number;
+  /** Present only when every detected block is a complete, valid MCQ. */
+  quizSet?: QuizSet;
+  error?: string;
+}
+
+const isLikelyInlineSource = (
+  rawArguments: string,
+  remainingLines: string[],
+): boolean => {
+  if (!rawArguments) return false;
+
+  const tokens = rawArguments.split(/\s+/);
+  const firstToken = tokens[0]?.toLowerCase() ?? "";
+  const startsWithControl = /^\d+$/.test(firstToken) ||
+    DIFFICULTIES.has(firstToken as Difficulty);
+
+  if (startsWithControl) return false;
+
+  // A language-only command such as `/quiz Hindi` remains valid. Longer,
+  // sentence-like text after `/quiz` is source content, not command options.
+  // This also prevents numbers inside pasted prose (for example "20
+  // questions") from being mistaken for the requested question count.
+  const looksLikeSentence = /[,.!?;:।]/u.test(rawArguments) ||
+    tokens.length > 4 ||
+    Array.from(rawArguments).length > 40;
+
+  return looksLikeSentence || (remainingLines.length === 0 && tokens.length > 2);
+};
 
 export const parseQuizInput = (
   input: string,
@@ -40,6 +74,15 @@ export const parseQuizInput = (
   }
 
   const rawArguments = commandMatch[1]?.trim() ?? "";
+
+  if (isLikelyInlineSource(rawArguments, remainingLines)) {
+    return {
+      isQuizCommand: true,
+      options: defaults,
+      sourceText: [rawArguments, ...remainingLines].join("\n").trim(),
+    };
+  }
+
   const tokens = rawArguments ? rawArguments.split(/\s+/) : [];
   let count = defaultCount;
   let difficulty: Difficulty = "mixed";
@@ -103,6 +146,7 @@ export const parseQuizInput = (
     isQuizCommand: true,
     options: { count, difficulty, language },
     sourceText: remainingLines.join("\n").trim(),
+    ...(sawCount ? { countWasSpecified: true } : {}),
   };
 };
 
@@ -182,13 +226,138 @@ export const sanitizeQuizSet = (
   };
 };
 
+const NUMBERED_QUESTION = /^\s*(\d{1,3})\s*[.)]\s*(.+?)\s*$/u;
+const LETTERED_OPTION = /^\s*([A-D])\s*[).:：-]\s*(.+?)\s*$/iu;
+const CORRECT_ANSWER = /^\s*(?:✅\uFE0F?\s*)?(?:सही\s*उत्तर|उत्तर|correct\s*answer|answer|ans(?:wer)?)\s*[:：-]?\s*([A-D])(?:\s*[).:：-]\s*.*?)?\s*$/iu;
+const EXPLANATION = /^\s*(?:💡\uFE0F?\s*)?(?:व्याख्या|explanation)\s*[:：-]\s*(.+?)\s*$/iu;
+
+/**
+ * Converts an already-written, numbered MCQ list into Telegram quiz data.
+ *
+ * Supported blocks look like:
+ *   1. Question?
+ *   A) First option
+ *   B) Second option
+ *   C) Third option
+ *   D) Fourth option
+ *   ✅ सही उत्तर: B) Second option
+ *
+ * Returning no quizSet lets the normal Gemini source-generation path handle
+ * prose and partially formatted lists instead of silently dropping questions.
+ */
+export const parsePastedQuiz = (
+  sourceText: string,
+  maxCount: number,
+): ParsedPastedQuiz => {
+  const lines = sourceText.split(/\r?\n/);
+  const questionStarts: Array<{
+    lineIndex: number;
+    question: string;
+  }> = [];
+
+  for (const [lineIndex, line] of lines.entries()) {
+    const match = line.match(NUMBERED_QUESTION);
+    if (!match?.[2]) continue;
+    questionStarts.push({ lineIndex, question: match[2] });
+  }
+
+  if (questionStarts.length === 0) return { detectedCount: 0 };
+  if (questionStarts.length > maxCount) {
+    return {
+      detectedCount: questionStarts.length,
+      error: `A maximum of ${maxCount} quiz questions can be sent at once. This message contains ${questionStarts.length}.`,
+    };
+  }
+
+  const rawQuizzes: RawQuiz[] = [];
+  for (const [index, start] of questionStarts.entries()) {
+    const end = questionStarts[index + 1]?.lineIndex ?? lines.length;
+    const block = lines.slice(start.lineIndex + 1, end);
+    const options = new Map<string, string>();
+    let correctLetter: string | undefined;
+    let explanation = "";
+
+    for (const line of block) {
+      const optionMatch = line.match(LETTERED_OPTION);
+      if (optionMatch?.[1] && optionMatch[2]) {
+        options.set(optionMatch[1].toUpperCase(), optionMatch[2]);
+        continue;
+      }
+
+      const answerMatch = line.match(CORRECT_ANSWER);
+      if (answerMatch?.[1]) {
+        correctLetter = answerMatch[1].toUpperCase();
+        continue;
+      }
+
+      const explanationMatch = line.match(EXPLANATION);
+      if (explanationMatch?.[1]) explanation = explanationMatch[1];
+    }
+
+    const orderedOptions = ["A", "B", "C", "D"].map((letter) =>
+      options.get(letter)
+    );
+    const correctOption = correctLetter
+      ? ["A", "B", "C", "D"].indexOf(correctLetter)
+      : -1;
+
+    if (
+      orderedOptions.some((option) => !option) ||
+      options.size !== 4 ||
+      correctOption < 0
+    ) {
+      return { detectedCount: questionStarts.length };
+    }
+
+    const correctAnswer = orderedOptions[correctOption] ?? "";
+    const usesDevanagari = /[\u0900-\u097F]/u.test(start.question);
+    rawQuizzes.push({
+      question: start.question,
+      options: orderedOptions,
+      correctOption,
+      explanation: explanation ||
+        (usesDevanagari
+          ? `सही उत्तर: ${correctAnswer}`
+          : `Correct answer: ${correctAnswer}`),
+    });
+  }
+
+  const firstQuestionLine = questionStarts[0]?.lineIndex ?? 0;
+  const title = lines
+    .slice(0, firstQuestionLine)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1) || "Pasted MCQ Quiz";
+  let quizSet: QuizSet;
+  try {
+    quizSet = sanitizeQuizSet(
+      { title, language: "auto", quizzes: rawQuizzes },
+      rawQuizzes.length,
+    );
+  } catch {
+    return { detectedCount: questionStarts.length };
+  }
+
+  // Duplicate or malformed questions should use the AI fallback rather than
+  // making a silently incomplete direct quiz.
+  if (quizSet.quizzes.length !== rawQuizzes.length) {
+    return { detectedCount: questionStarts.length };
+  }
+
+  return { detectedCount: rawQuizzes.length, quizSet };
+};
+
 export const buildQuizPrompt = (options: QuizRequestOptions): string => {
   const languageInstruction =
     options.language.toLowerCase() === "auto"
       ? "Use the source's main language. If the source is Hinglish, use natural Hinglish."
       : `Write every question, option, and explanation in ${options.language}.`;
+  const maximumCount = options.maxCount ?? options.count;
+  const countInstruction = options.autoCount
+    ? `Inspect the supplied source first. If it contains a pre-written question set, convert every distinct question in that set, up to ${maximumCount}; never stop at the fallback count of ${options.count}. If it is study material rather than a question set, create exactly ${options.count} questions.`
+    : `Create exactly ${options.count} high-quality Telegram quiz questions from the supplied source.`;
 
-  return `Create exactly ${options.count} high-quality Telegram quiz questions from the supplied source.
+  return `${countInstruction}
 
 Requirements:
 - Difficulty: ${options.difficulty}.

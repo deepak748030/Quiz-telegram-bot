@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
+      - key: MAX_QUIZ_COUNT
+        value: 50
       # Create these three in the Render dashboard (Dashboard > Service > Environment)
       # so secrets are never committed:
       - key: TELEGRAM_BOT_TOKEN

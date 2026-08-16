@@ -61,9 +61,14 @@ export interface TelegramFile {
 export type Difficulty = "easy" | "medium" | "hard" | "mixed";
 
 export interface QuizRequestOptions {
+  /** Fixed count, or the fallback count when autoCount is enabled. */
   count: number;
   difficulty: Difficulty;
   language: string;
+  /** Preserve every question found in an uploaded question set. */
+  autoCount?: boolean;
+  /** Upper bound used by autoCount. */
+  maxCount?: number;
 }
 
 export interface RawQuiz {

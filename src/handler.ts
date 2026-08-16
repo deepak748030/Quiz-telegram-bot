@@ -1,6 +1,6 @@
 import { getConfig } from "./config.js";
 import { GeminiQuizGenerator } from "./gemini.js";
-import { parseQuizInput } from "./quiz.js";
+import { parsePastedQuiz, parseQuizInput } from "./quiz.js";
 import { delay, formatBytes, TelegramClient } from "./telegram.js";
 import type {
   QuizRequestOptions,
@@ -36,7 +36,7 @@ const startText = (firstName: string, defaultCount: number, maxCount: number) =>
 
 Send me <b>any text</b> or a <b>PDF</b>. I’ll turn it into native Telegram quiz polls with answers and explanations.
 
-<b>Default:</b> ${defaultCount} mixed-difficulty questions in the source language.
+<b>Default:</b> ${defaultCount} mixed-difficulty questions for study material. Pre-written question sets are counted automatically (up to ${maxCount}).
 
 <b>Custom quiz</b>
 <code>/quiz 12 hard Hindi</code>
@@ -53,6 +53,7 @@ const helpText = (maxCount: number, maxPdfBytes: number) => `
 3️⃣ <b>Custom:</b>
 <pre>/quiz 10 medium Hinglish
 Paste your source text here...</pre>
+4️⃣ <b>Ready-made questions:</b> paste a numbered list or upload a question-set PDF. I’ll use every detected question instead of stopping at the default count (up to ${maxCount}). Complete MCQs with A)–D) and <code>Correct answer:</code> or <code>सही उत्तर:</code> are sent directly.
 For a PDF, add <code>/quiz 10 medium Hinglish</code> as its caption.
 
 <b>Format</b>
@@ -120,12 +121,18 @@ const getRequest = (
   message: TelegramMessage,
   defaultCount: number,
   maxCount: number,
-): { options: QuizRequestOptions; sourceText: string; error?: string } => {
+): {
+  options: QuizRequestOptions;
+  sourceText: string;
+  countWasSpecified: boolean;
+  error?: string;
+} => {
   const input = message.document ? message.caption ?? "" : message.text ?? "";
   const parsed = parseQuizInput(input, defaultCount, maxCount);
   return {
     options: parsed.options,
     sourceText: parsed.sourceText,
+    countWasSpecified: parsed.countWasSpecified === true,
     ...(parsed.error ? { error: parsed.error } : {}),
   };
 };
@@ -227,9 +234,38 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     return;
   }
 
+  const pastedQuiz = parsePastedQuiz(
+    message.document ? "" : request.sourceText,
+    config.maxQuizCount,
+  );
+  if (pastedQuiz.error) {
+    await telegram.sendMessage(
+      message.chat.id,
+      `⚠️ ${escapeHtml(pastedQuiz.error)}`,
+      replyOptions(message),
+    );
+    return;
+  }
+
+  const inferredCount =
+    !request.countWasSpecified && pastedQuiz.detectedCount > 0
+      ? pastedQuiz.detectedCount
+      : request.options.count;
+  const generationOptions: QuizRequestOptions = {
+    ...request.options,
+    count: inferredCount,
+    ...(message.document && !request.countWasSpecified
+      ? { autoCount: true, maxCount: config.maxQuizCount }
+      : {}),
+  };
+  const countLabel = pastedQuiz.quizSet
+    ? String(pastedQuiz.quizSet.quizzes.length)
+    : generationOptions.autoCount
+      ? `up to ${config.maxQuizCount}`
+      : String(generationOptions.count);
   const status = await telegram.sendMessage(
     message.chat.id,
-    `⏳ <b>Creating ${request.options.count} quiz questions…</b>\nReading the source and checking the answers.`,
+    `⏳ <b>Creating ${countLabel} quiz questions…</b>\nReading the source and checking the answers.`,
     replyOptions(message),
   );
 
@@ -240,26 +276,29 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       message.message_thread_id,
     );
 
-    let source: QuizSource;
-    if (message.document) {
-      const bytes = await telegram.downloadFile(
-        message.document.file_id,
-        config.maxPdfBytes,
-      );
-      if (!hasPdfSignature(bytes)) throw new Error("Document is not a valid PDF.");
-      source = {
-        kind: "pdf",
-        data: bytes,
-      };
-    } else {
-      source = { kind: "text", text: request.sourceText };
-    }
+    let quizSet = pastedQuiz.quizSet;
+    if (!quizSet) {
+      let source: QuizSource;
+      if (message.document) {
+        const bytes = await telegram.downloadFile(
+          message.document.file_id,
+          config.maxPdfBytes,
+        );
+        if (!hasPdfSignature(bytes)) throw new Error("Document is not a valid PDF.");
+        source = {
+          kind: "pdf",
+          data: bytes,
+        };
+      } else {
+        source = { kind: "text", text: request.sourceText };
+      }
 
-    const generator = new GeminiQuizGenerator(
-      config.geminiApiKey,
-      config.geminiModel,
-    );
-    const quizSet = await generator.generate(source, request.options);
+      const generator = new GeminiQuizGenerator(
+        config.geminiApiKey,
+        config.geminiModel,
+      );
+      quizSet = await generator.generate(source, generationOptions);
+    }
 
     await telegram.editMessage(
       message.chat.id,
