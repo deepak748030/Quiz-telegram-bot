@@ -5,7 +5,7 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 ## What it does
 
 - Accepts normal Telegram text messages and PDFs.
-- Creates 3–15 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
+- Creates 3–50 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
 - Supports easy, medium, hard, and mixed difficulty.
 - Uses Gemini structured JSON output, then validates every question against Telegram limits.
 - Uses Telegram's current `InputPollOption` objects and `correct_option_ids` quiz API.
@@ -98,8 +98,8 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Random secret generated above |
 | `GEMINI_API_KEY` | Yes | Key from AI Studio |
 | `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite` |
-| `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` |
-| `MAX_QUIZ_COUNT` | No | Defaults/maxes at `15` |
+| `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
+| `MAX_QUIZ_COUNT` | No | Defaults/maxes at `50` |
 | `MAX_PDF_BYTES` | No | Defaults to `20000000` |
 | `POLL_DELAY_MS` | No | Defaults to `1000` to respect Telegram limits |
 
@@ -157,11 +157,15 @@ You can also open `https://YOUR-PROJECT.onrender.com/webhook` in a browser. A he
 
 ### Instant quiz
 
-Send or paste ordinary source text. The bot creates 8 mixed questions in the source language.
+Send or paste ordinary study material. The bot creates 8 mixed questions in the source language.
+
+If the source is already a numbered question/MCQ set, the bot automatically uses the detected question count instead of stopping at 8. A complete list with `A)`–`D)` options and a `Correct answer:` or `सही उत्तर:` line is preserved and sent directly. Uploaded PDF question sets are also converted in full. All automatic modes are capped at 50 polls; use an explicit `/quiz 10 ...` count when you want a fixed number.
+
+Sentence-like source text may begin on the same line as `/quiz`, so numbers such as “20 questions” are not mistaken for command options.
 
 ### Custom text quiz
 
-The source must begin on the next line:
+When using count, difficulty, or language controls, put the source on the next line:
 
 ```text
 /quiz 10 hard Hindi
@@ -179,7 +183,7 @@ Upload a PDF and use this as its Telegram caption:
 Command syntax:
 
 ```text
-/quiz [3-15] [easy|medium|hard|mixed] [language]
+/quiz [3-50] [easy|medium|hard|mixed] [language]
 ```
 
 All parts are optional. Examples:
@@ -221,7 +225,7 @@ Telegram requires a public HTTPS webhook, so use a secure tunnel only for local 
 
 - **PDF size:** Telegram's hosted Bot API allows bots to download files up to 20 MB. Gemini itself can accept larger PDFs, but Telegram is the bottleneck here.
 - **PDF type:** Password-protected, corrupted, or fake `.pdf` files are rejected or may fail processing.
-- **Quiz count:** Capped at 15 so a complete quiz remains within Telegram's per-chat messaging limits and the web service stays responsive.
+- **Quiz count:** Capped at 50. Polls are paced to stay within Telegram's per-chat messaging limits.
 - **Rate limits:** “Free” does not mean unlimited. Gemini and Render apply free-tier quotas. Telegram also recommends no more than roughly one message per second in one chat, which is why poll sending is paced.
 - **Data handling:** The app does not store user content in a database. It downloads each PDF into memory, sends the source to Gemini, sends polls to Telegram, and then the task ends. Google states on its pricing page that free-tier content may be used to improve its products. Do not send sensitive documents unless that policy is acceptable.
 - **Reliability:** The server acknowledges the webhook and finishes quiz generation in the background. If a provider is unavailable, the user receives an error where possible; no durable job queue is included.
