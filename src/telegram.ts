@@ -2,6 +2,7 @@ import type {
   Quiz,
   TelegramApiResponse,
   TelegramFile,
+  TelegramInlineKeyboardMarkup,
   TelegramSentMessage,
 } from "./types.js";
 
@@ -83,6 +84,7 @@ export class TelegramClient {
       replyToMessageId?: number;
       messageThreadId?: number;
       disableNotification?: boolean;
+      replyMarkup?: TelegramInlineKeyboardMarkup;
     } = {},
   ): Promise<TelegramSentMessage> {
     return this.call<TelegramSentMessage>("sendMessage", {
@@ -103,6 +105,7 @@ export class TelegramClient {
       ...(options.disableNotification !== undefined
         ? { disable_notification: options.disableNotification }
         : {}),
+      ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
     });
   }
 
@@ -111,6 +114,7 @@ export class TelegramClient {
     messageId: number,
     text: string,
     parseMode: "HTML" = "HTML",
+    replyMarkup?: TelegramInlineKeyboardMarkup,
   ): Promise<TelegramSentMessage> {
     return this.call<TelegramSentMessage>("editMessageText", {
       chat_id: chatId,
@@ -118,6 +122,26 @@ export class TelegramClient {
       text,
       parse_mode: parseMode,
       link_preview_options: { is_disabled: true },
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
+  }
+
+  deleteMessage(chatId: number, messageId: number): Promise<true> {
+    return this.call<true>("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  }
+
+  answerCallbackQuery(
+    callbackQueryId: string,
+    text?: string,
+    showAlert = false,
+  ): Promise<true> {
+    return this.call<true>("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text } : {}),
+      ...(showAlert ? { show_alert: true } : {}),
     });
   }
 

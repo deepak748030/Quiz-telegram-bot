@@ -5,14 +5,15 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 ## What it does
 
 - Accepts normal Telegram text messages and PDFs.
-- Creates 3–50 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
+- Creates 1–50 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
 - Supports easy, medium, hard, and mixed difficulty.
 - Uses Gemini structured JSON output, then validates every question against Telegram limits.
 - Uses Telegram's current `InputPollOption` objects and `correct_option_ids` quiz API.
 - Returns the webhook response immediately and finishes generation in the background, reducing Telegram retries during long AI calls.
 - Retries temporary Gemini failures and Telegram `429`/`5xx` responses.
 - Verifies Telegram's secret webhook header.
-- Keeps API keys in environment variables—never in client code.
+- Lets each Telegram user privately add/change their own Gemini API key and select any generation model available to it.
+- Keeps the bot owner’s key in environment variables and user keys only in process memory—never in client code or logs.
 
 ## Current stack (checked 16 August 2026)
 
@@ -133,7 +134,7 @@ npm install
 npm run webhook:set -- https://YOUR-PROJECT.onrender.com
 ```
 
-The script automatically appends `/webhook`, registers only `message` updates, adds the secret header, and installs the bot command menu. To discard old queued updates on first setup:
+The script automatically appends `/webhook`, registers `message` and `callback_query` updates, adds the secret header, and installs the bot command menu. To discard old queued updates on first setup:
 
 ```bash
 npm run webhook:set -- https://YOUR-PROJECT.onrender.com --drop
@@ -183,7 +184,7 @@ Upload a PDF and use this as its Telegram caption:
 Command syntax:
 
 ```text
-/quiz [3-50] [easy|medium|hard|mixed] [language]
+/quiz [1-50] [easy|medium|hard|mixed] [language]
 ```
 
 All parts are optional. Examples:
@@ -194,7 +195,13 @@ All parts are optional. Examples:
 /quiz 8 mixed auto
 ```
 
-Commands: `/start`, `/help`, `/quiz`, `/model`.
+Commands: `/start`, `/help`, `/quiz`, `/model`, `/apikey`.
+
+### Personal Gemini key and model
+
+In a **private chat** with the bot, send `/apikey YOUR_KEY`. The bot immediately tries to delete the secret-bearing message, validates the key, and uses that key only for that Telegram user. Send `/model` to load every Gemini model available to the active key and select one with inline buttons. Send `/apikey reset` to return to the bot owner’s default key and model.
+
+Personal settings are deliberately held only in process memory: they are not written to disk or logs, and reset when the service restarts or redeploys. Telegram may retain messages if deletion fails, so use only a private chat and revoke a key in Google AI Studio if it was exposed.
 
 ## Group usage
 
@@ -225,7 +232,7 @@ Telegram requires a public HTTPS webhook, so use a secure tunnel only for local 
 
 - **PDF size:** Telegram's hosted Bot API allows bots to download files up to 20 MB. Gemini itself can accept larger PDFs, but Telegram is the bottleneck here.
 - **PDF type:** Password-protected, corrupted, or fake `.pdf` files are rejected or may fail processing.
-- **Quiz count:** Capped at 50. Polls are paced to stay within Telegram's per-chat messaging limits.
+- **Quiz count:** Minimum 1 and capped at 50. Polls are paced to stay within Telegram's per-chat messaging limits.
 - **Rate limits:** “Free” does not mean unlimited. Gemini and Render apply free-tier quotas. Telegram also recommends no more than roughly one message per second in one chat, which is why poll sending is paced.
 - **Data handling:** The app does not store user content in a database. It downloads each PDF into memory, sends the source to Gemini, sends polls to Telegram, and then the task ends. Google states on its pricing page that free-tier content may be used to improve its products. Do not send sensitive documents unless that policy is acceptable.
 - **Reliability:** The server acknowledges the webhook and finishes quiz generation in the background. If a provider is unavailable, the user receives an error where possible; no durable job queue is included.

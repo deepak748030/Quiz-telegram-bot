@@ -39,11 +39,11 @@ export const getConfig = (): AppConfig => {
     );
   }
 
-  const maxQuizCount = readInteger("MAX_QUIZ_COUNT", 50, 3, 50);
+  const maxQuizCount = readInteger("MAX_QUIZ_COUNT", 50, 1, 50);
   const defaultQuizCount = readInteger(
     "DEFAULT_QUIZ_COUNT",
     8,
-    3,
+    1,
     maxQuizCount,
   );
 

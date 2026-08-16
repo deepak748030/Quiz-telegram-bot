@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { configurationStatus } from "./config.js";
 import { handleUpdate } from "./handler.js";
 import type { TelegramUpdate } from "./types.js";
+import { redactUserApiKeys } from "./user-settings.js";
 
 export interface WebhookHandlerOptions {
   /**
@@ -44,7 +45,7 @@ const backgroundError = (error: unknown): void => {
   ]) {
     if (secret) message = message.replaceAll(secret, "[REDACTED]");
   }
-  console.error("Unhandled webhook task error:", message);
+  console.error("Unhandled webhook task error:", redactUserApiKeys(message));
 };
 
 /**

@@ -43,11 +43,12 @@ describe("parseQuizInput", () => {
     expect(parsed.countWasSpecified).toBe(true);
   });
 
-  it("accepts up to 50 questions and rejects larger requests", () => {
+  it("accepts 1 to 50 questions and rejects larger requests", () => {
+    expect(parseQuizInput("/quiz 1 easy English", 8, 50).options.count).toBe(1);
     expect(parseQuizInput("/quiz 50 hard Hindi", 8, 50).options.count).toBe(50);
 
     const parsed = parseQuizInput("/quiz 99 hard Hindi", 8, 50);
-    expect(parsed.error).toContain("between 3 and 50");
+    expect(parsed.error).toContain("between 1 and 50");
   });
 
   it("rejects duplicate count and difficulty controls", () => {

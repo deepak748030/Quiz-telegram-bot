@@ -28,6 +28,6 @@ describe("quiz count configuration", () => {
     expect(getConfig().maxQuizCount).toBe(50);
 
     vi.stubEnv("MAX_QUIZ_COUNT", "51");
-    expect(() => getConfig()).toThrow("MAX_QUIZ_COUNT must be an integer from 3 to 50");
+    expect(() => getConfig()).toThrow("MAX_QUIZ_COUNT must be an integer from 1 to 50");
   });
 });

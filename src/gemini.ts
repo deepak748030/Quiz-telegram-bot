@@ -9,6 +9,55 @@ import type {
 } from "./types.js";
 
 const MAX_GEMINI_ATTEMPTS = 3;
+const MODEL_LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+interface GeminiModelListResponse {
+  models?: Array<{
+    name?: string;
+    supportedGenerationMethods?: string[];
+  }>;
+  nextPageToken?: string;
+}
+
+/** Returns every Gemini model available to this key that can generate content. */
+export const listGeminiModels = async (apiKey: string): Promise<string[]> => {
+  const models = new Set<string>();
+  let pageToken: string | undefined;
+
+  // Google currently returns only a few pages. The cap prevents a malformed
+  // upstream response from causing an endless loop.
+  for (let page = 0; page < 20; page += 1) {
+    const url = new URL(MODEL_LIST_ENDPOINT);
+    url.searchParams.set("pageSize", "1000");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const response = await fetch(url, {
+      headers: { "x-goog-api-key": apiKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+    const data = (await response.json().catch(() => ({}))) as GeminiModelListResponse & {
+      error?: { message?: string };
+    };
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Gemini model list failed with HTTP ${response.status}.`);
+    }
+
+    for (const model of data.models ?? []) {
+      if (!model.supportedGenerationMethods?.includes("generateContent")) continue;
+      const name = model.name?.replace(/^models\//, "").trim();
+      if (name?.startsWith("gemini-")) models.add(name);
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  const result = [...models].sort((left, right) => left.localeCompare(right));
+  if (result.length === 0) {
+    throw new Error("No Gemini content-generation models are available for this API key.");
+  }
+  return result;
+};
 
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
