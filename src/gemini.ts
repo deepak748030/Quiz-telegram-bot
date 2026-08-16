@@ -150,26 +150,15 @@ export class GeminiQuizGenerator {
       ? options.maxCount ?? options.count
       : options.count;
     const minimumOutputCount = options.autoCount ? 1 : options.count;
-    const sourceParts =
-      source.kind === "text"
-        ? [
-            instructionPart,
-            {
-              text: `\n<source>\n${source.text}\n</source>`,
-            },
-          ]
-        : [
-            instructionPart,
-            {
-              inlineData: {
-                mimeType: "application/pdf",
-                data: Buffer.from(source.data).toString("base64"),
-              },
-            },
-            {
-              text: "The attached PDF is the only source for the quiz.",
-            },
-          ];
+    // PDF uploads are converted to text by the handler before reaching this
+    // class. Every selected content-generation model therefore receives the
+    // same ordinary text request; native PDF-input support is not required.
+    const sourceParts = [
+      instructionPart,
+      {
+        text: `\n<source>\n${source.text}\n</source>`,
+      },
+    ];
 
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt += 1) {

@@ -43,32 +43,29 @@ const validResponseText = JSON.stringify({
 });
 
 describe("GeminiQuizGenerator", () => {
-  it("sends a PDF as base64 inline data with the correct mime type", async () => {
+  it("sends source text without model-specific PDF inline data", async () => {
     generateContentMock.mockResolvedValue({ text: validResponseText });
 
-    const pdfBytes = new TextEncoder().encode("%PDF-1.4 sample content");
     const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash-lite");
-    await generator.generate({ kind: "pdf", data: pdfBytes }, baseOptions);
+    await generator.generate(
+      { kind: "text", text: "Text extracted locally from an uploaded PDF." },
+      baseOptions,
+    );
 
     expect(generateContentMock).toHaveBeenCalledTimes(1);
     const request = generateContentMock.mock.calls[0]?.[0] as {
       model: string;
-      contents: Array<{ role: string; parts: unknown[] }>;
+      contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
     };
     expect(request.model).toBe("gemini-2.5-flash-lite");
-
-    const inlineDataPart = request.contents[0]?.parts.find(
-      (part) =>
-        typeof part === "object" &&
-        part !== null &&
-        "inlineData" in (part as Record<string, unknown>),
-    ) as { inlineData: { mimeType: string; data: string } } | undefined;
-
-    expect(inlineDataPart).toBeDefined();
-    expect(inlineDataPart?.inlineData.mimeType).toBe("application/pdf");
-    // The base64 must round-trip back to the original PDF bytes.
-    const decoded = Buffer.from(inlineDataPart!.inlineData.data, "base64");
-    expect(decoded).toEqual(Buffer.from(pdfBytes));
+    expect(request.contents[0]?.parts).not.toContainEqual(
+      expect.objectContaining({ inlineData: expect.anything() }),
+    );
+    expect(request.contents[0]?.parts).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("Text extracted locally from an uploaded PDF."),
+      }),
+    );
   });
 
   it("migrates a retired gemini-2.0-flash model to gemini-2.5-flash-lite", async () => {
@@ -101,7 +98,7 @@ describe("GeminiQuizGenerator", () => {
 
     const generator = new GeminiQuizGenerator("key", "gemini-2.5-flash-lite");
     await expect(
-      generator.generate({ kind: "pdf", data: new TextEncoder().encode("%PDF-1.4 x") }, baseOptions),
+      generator.generate({ kind: "text", text: "Extracted PDF text" }, baseOptions),
     ).rejects.toBe(apiError);
   });
 });
