@@ -245,10 +245,123 @@ const EXPLANATION = /^\s*(?:💡\uFE0F?\s*)?(?:व्याख्या|explanat
  * Returning no quizSet lets the normal Gemini source-generation path handle
  * prose and partially formatted lists instead of silently dropping questions.
  */
+const parseSeparateAnswerKeyQuiz = (
+  sourceText: string,
+  maxCount: number,
+): QuizSet | undefined => {
+  const keyMatch = /(?:answer\s*key|उत्तर\s*(?:कुंजी|माला))/iu.exec(sourceText);
+  if (!keyMatch) return undefined;
+
+  const body = sourceText.slice(0, keyMatch.index);
+  const answerKey = sourceText.slice(keyMatch.index + keyMatch[0].length);
+  const answers = new Map<number, number>();
+  let answerCursor = 0;
+
+  // Read keys in numerical order. Searching for the expected number also
+  // handles Telegram text whose line breaks were removed, e.g. "B) 9010. B)".
+  for (let number = 1; number <= maxCount; number += 1) {
+    const marker = `${number}.`;
+    const markerIndex = answerKey.indexOf(marker, answerCursor);
+    if (markerIndex < 0) break;
+    const answerMatch = answerKey
+      .slice(markerIndex + marker.length)
+      .match(/^\s*([A-D])\s*[).:：-]/iu);
+    if (!answerMatch?.[1]) break;
+    answers.set(number, answerMatch[1].toUpperCase().charCodeAt(0) - 65);
+    answerCursor = markerIndex + marker.length;
+  }
+  if (answers.size === 0) return undefined;
+
+  const rawQuizzes: RawQuiz[] = [];
+  let questionCursor = body.indexOf("1.");
+  if (questionCursor < 0) return undefined;
+  const firstQuestionIndex = questionCursor;
+
+  for (let number = 1; number <= answers.size; number += 1) {
+    const marker = `${number}.`;
+    if (!body.startsWith(marker, questionCursor)) return undefined;
+    const contentStart = questionCursor + marker.length;
+    let contentEnd = body.length;
+
+    if (number < answers.size) {
+      const nextMarker = `${number + 1}.`;
+      let candidate = body.indexOf(nextMarker, contentStart);
+      let foundBoundary = -1;
+      while (candidate >= 0) {
+        const possibleBlock = body.slice(contentStart, candidate);
+        if (
+          /A\s*[).:：-]/iu.test(possibleBlock) &&
+          /B\s*[).:：-]/iu.test(possibleBlock) &&
+          /C\s*[).:：-]/iu.test(possibleBlock) &&
+          /D\s*[).:：-]/iu.test(possibleBlock)
+        ) {
+          foundBoundary = candidate;
+          break;
+        }
+        candidate = body.indexOf(nextMarker, candidate + 1);
+      }
+      if (foundBoundary < 0) return undefined;
+      contentEnd = foundBoundary;
+    }
+
+    const block = body.slice(contentStart, contentEnd).trim();
+    const optionPattern = /([A-D])\s*[).:：-]\s*/giu;
+    const optionMarkers = [...block.matchAll(optionPattern)];
+    if (optionMarkers.length !== 4) return undefined;
+    if (optionMarkers.map((match) => match[1]?.toUpperCase()).join("") !== "ABCD") {
+      return undefined;
+    }
+
+    const firstOptionIndex = optionMarkers[0]?.index;
+    if (firstOptionIndex === undefined) return undefined;
+    const question = block.slice(0, firstOptionIndex).trim();
+    const options = optionMarkers.map((match, index) => {
+      const start = (match.index ?? 0) + match[0].length;
+      const end = optionMarkers[index + 1]?.index ?? block.length;
+      return block.slice(start, end).trim();
+    });
+    const correctOption = answers.get(number);
+    if (!question || correctOption === undefined || options.some((option) => !option)) {
+      return undefined;
+    }
+
+    rawQuizzes.push({
+      question,
+      options,
+      correctOption,
+      explanation: `Correct answer: ${options[correctOption] ?? ""}`,
+    });
+    questionCursor = contentEnd;
+  }
+
+  if (rawQuizzes.length !== answers.size) return undefined;
+  const title = body.slice(0, firstQuestionIndex).trim() || "Pasted MCQ Quiz";
+  try {
+    const quizSet = sanitizeQuizSet(
+      { title, language: "auto", quizzes: rawQuizzes },
+      rawQuizzes.length,
+    );
+    return quizSet.quizzes.length === rawQuizzes.length ? quizSet : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const parsePastedQuiz = (
   sourceText: string,
   maxCount: number,
 ): ParsedPastedQuiz => {
+  // Answer keys are often placed after all questions, and Telegram/PDF copy
+  // operations can remove every line break. Parse that common format locally
+  // so a ready-made quiz does not need an AI round trip at all.
+  const separateKeyQuiz = parseSeparateAnswerKeyQuiz(sourceText, maxCount);
+  if (separateKeyQuiz) {
+    return {
+      detectedCount: separateKeyQuiz.quizzes.length,
+      quizSet: separateKeyQuiz,
+    };
+  }
+
   const lines = sourceText.split(/\r?\n/);
   const questionStarts: Array<{
     lineIndex: number;

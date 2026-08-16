@@ -1,4 +1,4 @@
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 import { buildQuizPrompt, sanitizeQuizSet } from "./quiz.js";
 import type {
@@ -133,7 +133,12 @@ export class GeminiQuizGenerator {
 
   constructor(apiKey: string, model: string) {
     this.#client = new GoogleGenAI({ apiKey });
-    this.#model = model;
+    // Gemini 2.0 Flash/Flash-Lite were shut down on 1 June 2026. Silently
+    // migrate old deployments whose Render environment still names either
+    // retired model, instead of failing every text and PDF request.
+    this.#model = /^gemini-2\.0-flash(?:-lite)?(?:-001)?$/i.test(model.trim())
+      ? "gemini-2.5-flash-lite"
+      : model;
   }
 
   async generate(
@@ -180,16 +185,17 @@ export class GeminiQuizGenerator {
               minimumOutputCount,
               maximumOutputCount,
             ),
-            // Free-tier Flash models have an 8,192-token output limit. Cap at
-            // that bound — Pro models with billing can go higher, but the
-            // default targets free-tier availability. 8,192 tokens fit
-            // roughly 100 compact JSON quiz questions.
+            // The current stable 2.5 Flash-Lite model supports a 65,536-token
+            // output. A larger cap prevents long PDF/question-set responses
+            // from being cut off halfway through their JSON.
             maxOutputTokens: Math.min(
               Math.max(4_096, maximumOutputCount * 500),
-              8_192,
+              32_768,
             ),
             temperature: 0.45,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+            // Do not send thinkingConfig here. Thinking controls differ by
+            // model family, and adding MINIMAL made otherwise valid requests
+            // fail on models (including 2.5 Flash-Lite) that don't support it.
           },
         });
 
@@ -199,7 +205,15 @@ export class GeminiQuizGenerator {
       } catch (error) {
         lastError = error;
         const status = statusFromError(error);
-        const retryable = status === 429 || status === 500 || status === 503;
+        const errorText = error instanceof Error ? error.message.toLowerCase() : "";
+        const retryable =
+          status === 429 ||
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          error instanceof SyntaxError ||
+          errorText.includes("empty response") ||
+          errorText.includes("did not return any valid");
         if (!retryable || attempt >= MAX_GEMINI_ATTEMPTS - 1) throw error;
         await sleep(750 * 2 ** attempt + Math.floor(Math.random() * 250));
       }

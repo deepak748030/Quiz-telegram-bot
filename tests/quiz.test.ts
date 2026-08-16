@@ -116,6 +116,44 @@ D) NaCl
     });
   });
 
+  it("parses a separate answer key even when Telegram removes all line breaks", () => {
+    const compact = "20-Question General Knowledge Quiz1. Largest planet?A) EarthB) MarsC) JupiterD) Venus2. Gas absorbed by plants?A) OxygenB) Carbon dioxideC) HydrogenD) Helium3. What is 15 × 6?A) 80B) 90C) 100D) 120Answer Key1. C) Jupiter2. B) Carbon dioxide3. B) 90";
+    const result = parsePastedQuiz(compact, 50);
+
+    expect(result.detectedCount).toBe(3);
+    expect(result.quizSet?.quizzes).toHaveLength(3);
+    expect(result.quizSet?.quizzes[0]).toMatchObject({
+      question: "Largest planet?",
+      options: ["Earth", "Mars", "Jupiter", "Venus"],
+      correctOption: 2,
+    });
+    expect(result.quizSet?.quizzes[2]).toMatchObject({
+      question: "What is 15 × 6?",
+      options: ["80", "90", "100", "120"],
+      correctOption: 1,
+    });
+  });
+
+  it("parses normal multiline questions followed by one answer-key section", () => {
+    const result = parsePastedQuiz(`General Knowledge
+1. Largest planet?
+A) Earth
+B) Mars
+C) Jupiter
+D) Venus
+2. Red planet?
+A) Venus
+B) Mars
+C) Jupiter
+D) Saturn
+Answer Key
+1. C) Jupiter
+2. B) Mars`, 50);
+
+    expect(result.quizSet?.quizzes).toHaveLength(2);
+    expect(result.quizSet?.quizzes.map((quiz) => quiz.correctOption)).toEqual([2, 1]);
+  });
+
   it("accepts all 100 complete questions in one message", () => {
     const result = parsePastedQuiz(makePastedQuiz(100), 100);
     expect(result.error).toBeUndefined();
