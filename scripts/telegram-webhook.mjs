@@ -29,12 +29,12 @@ const webhookUrl = () => {
   const raw = args.find((argument) => !argument.startsWith("--")) || process.env.WEBHOOK_URL;
   if (!raw) {
     throw new Error(
-      "Pass your deployed URL: npm run webhook:set -- https://your-project.vercel.app",
+      "Pass your deployed URL: npm run webhook:set -- https://your-service.onrender.com",
     );
   }
   const url = new URL(raw);
   if (url.protocol !== "https:") throw new Error("The webhook URL must use HTTPS.");
-  if (!url.pathname || url.pathname === "/") url.pathname = "/api/webhook";
+  if (!url.pathname || url.pathname === "/") url.pathname = "/webhook";
   return url.toString().replace(/\/$/, "");
 };
 
