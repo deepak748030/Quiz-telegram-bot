@@ -111,40 +111,131 @@ For a PDF, add <code>/quiz 10 medium Hinglish</code> as its caption.
 /apikey reset — return to the bot’s default key and model
 `.trim();
 
+/** Short, presentable, secret-free excerpt of an error for user-facing text. */
+const sanitizeErrorHint = (raw: string): string => {
+  // The @google/genai SDK throws an ApiError whose `message` is the raw JSON
+  // error body, e.g. {"error":{"code":400,"message":"...","status":"..."}}.
+  // Prefer that inner human-readable message when it can be parsed.
+  let text = raw;
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const body = JSON.parse(jsonMatch[0]) as { error?: { message?: string } };
+      if (body?.error?.message) text = body.error.message;
+    } catch {
+      /* keep the original text */
+    }
+  }
+
+  let clean = text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  const secrets = [
+    process.env.TELEGRAM_BOT_TOKEN,
+    process.env.GEMINI_API_KEY,
+    process.env.TELEGRAM_WEBHOOK_SECRET,
+  ].filter((value): value is string => Boolean(value));
+  for (const secret of secrets) clean = clean.replaceAll(secret, "[REDACTED]");
+  clean = redactUserApiKeys(clean);
+  if (clean.length > 140) clean = `${clean.slice(0, 137)}...`;
+  return clean ? ` (${clean})` : "";
+};
+
 const safeErrorMessage = (
   error: unknown,
   usesPersonalKey = false,
   wasPdf = false,
 ): string => {
   const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
+  const status =
+    error && typeof error === "object" && "status" in error
+      ? Number((error as { status?: unknown }).status)
+      : NaN;
+  // Treat snake_case and space-separated status strings the same way - Gemini
+  // reports both "resource_exhausted" and "RESOURCE_EXHAUSTED", for instance.
+  const normalized = message.toLowerCase().replaceAll("_", " ");
+  // Short, secret-free excerpt of the real error. Surfaced in the branches
+  // where a friendly guess alone would leave the user (and support) guessing.
+  const hint = sanitizeErrorHint(message);
 
-  if (normalized.includes("larger than") || normalized.includes("too large")) {
-    return `That PDF is too large for Telegram’s hosted Bot API. Please upload a file under 20 MB.`;
+  if (
+    normalized.includes("too large") ||
+    normalized.includes("too big") ||
+    normalized.includes("larger than") ||
+    normalized.includes("exceeds the") ||
+    normalized.includes("maximum allowed") ||
+    normalized.includes("max bytes") ||
+    normalized.includes("request entity too large")
+  ) {
+    return wasPdf
+      ? `That PDF is too large for the AI service to process inline.${hint} Try a smaller PDF (a few MB or less), or paste the text directly.`
+      : `That request is too large for the AI service to process at once.${hint}`;
   }
-  if (normalized.includes("429") || normalized.includes("quota") || normalized.includes("resource_exhausted")) {
-    return "Gemini’s free quota is busy or exhausted right now. Please wait a little and try again.";
+  if (
+    normalized.includes("429") ||
+    normalized.includes("quota") ||
+    normalized.includes("resource exhausted") ||
+    normalized.includes("rate limit")
+  ) {
+    return "Gemini's free quota is busy or exhausted right now. Please wait a little and try again.";
   }
-  if (normalized.includes("pdf") || normalized.includes("document")) {
-    return "I couldn’t read that PDF. Make sure it is a valid, non-password-protected PDF and try again.";
-  }
-  if (normalized.includes("api key") || normalized.includes("401") || normalized.includes("403")) {
+  if (
+    normalized.includes("api key") ||
+    normalized.includes("apikey") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("unauthenticated") ||
+    normalized.includes("permission denied") ||
+    /\b40[13]\b/.test(normalized)
+  ) {
     return usesPersonalKey
       ? "Your Gemini API key was rejected. Update it in private with /apikey YOUR_KEY."
-      : "The bot’s AI service is not configured correctly. Please contact the bot owner.";
+      : "The bot's AI service is not configured correctly. Please contact the bot owner.";
   }
-  if (normalized.includes("invalid argument") || normalized.includes("not found") || normalized.includes("model not supported")) {
-    return "The selected Gemini model is not available or doesn't support quiz generation. Use /model to pick a different one, or check the GEMINI_MODEL environment variable.";
+  if (status === 500 || status === 502 || status === 503 || status === 504) {
+    return "Gemini had a temporary server error. Please try again in a moment.";
   }
-  if (normalized.includes("json") || normalized.includes("empty response") || normalized.includes("did not return any valid")) {
+  if (
+    normalized.includes("not found") ||
+    normalized.includes("model not supported") ||
+    normalized.includes("not supported") ||
+    normalized.includes("does not support")
+  ) {
+    return "The selected Gemini model is not available or doesn't support this request. Use /model to pick a different one.";
+  }
+  if (normalized.includes("invalid argument") || normalized.includes("invalid value")) {
+    return wasPdf
+      ? `Gemini rejected this PDF's content or format.${hint} Try a text-based (not scanned) PDF or a smaller file, or paste the text directly. You can also switch models with /model.`
+      : `Gemini could not process this request.${hint} Please retry, or choose another model with /model.`;
+  }
+  if (
+    normalized.includes("safety") ||
+    normalized.includes("blocked") ||
+    normalized.includes("prohibited") ||
+    normalized.includes("harmful")
+  ) {
+    return "Gemini blocked this content for safety reasons. Try different source material.";
+  }
+  if (
+    normalized.includes("json") ||
+    normalized.includes("empty response") ||
+    normalized.includes("did not return any valid") ||
+    normalized.includes("cannot get text")
+  ) {
     return "Gemini did not return usable quiz questions after 3 attempts. Please retry once; if it continues, choose another model with /model.";
   }
-  if (normalized.includes("fetch") || normalized.includes("timeout") || normalized.includes("network")) {
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("timeout") ||
+    normalized.includes("network") ||
+    normalized.includes("econnreset") ||
+    normalized.includes("socket")
+  ) {
     return "The AI service could not be reached. Please wait a moment and try again.";
   }
+
+  // Fallback: surface the real error so the user (and support) can act on it
+  // instead of guessing from a generic message.
   return wasPdf
-    ? "I couldn’t create a quiz from this PDF. Check that it opens normally and is not password-protected, then try /model if the problem continues."
-    : "I couldn’t create this quiz. Please retry once or choose another model with /model.";
+    ? `I couldn't create a quiz from this PDF.${hint} Try a smaller or text-based PDF, paste the text directly, or use /model to switch models.`
+    : `I couldn't create this quiz.${hint} Please retry or choose another model with /model.`;
 };
 
 const logError = (context: string, error: unknown): void => {
@@ -207,14 +298,34 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     try {
       const callbackMessage = callback.message;
       const settings = getUserAISettings(callback.from.id);
-      const models = settings.availableModels;
-      if (!callbackMessage || !models || models.length === 0) {
+      let models = settings.availableModels;
+      if (!callbackMessage) {
         await telegram.answerCallbackQuery(
           callback.id,
-          "This model list expired. Send /model again.",
+          "This menu is no longer available. Send /model again.",
           true,
         );
         return;
+      }
+      // The model catalogue lives only in process memory, so it can disappear
+      // after a restart, a redeploy, or a cold serverless invocation — even
+      // though the inline buttons stay on screen. Rebuild it from the active
+      // key so the buttons (model selection + Next/Previous) keep responding
+      // instead of looking dead. The list is sorted deterministically, so a
+      // button's index still maps to the same model.
+      if (!models || models.length === 0) {
+        const apiKey = settings.apiKey ?? config.geminiApiKey;
+        try {
+          models = await listGeminiModels(apiKey);
+          setAvailableModels(callback.from.id, models);
+        } catch {
+          await telegram.answerCallbackQuery(
+            callback.id,
+            "I couldn't refresh the model list. Send /model to reload it.",
+            true,
+          );
+          return;
+        }
       }
 
       const modelMatch = callback.data?.match(/^model:(\d+)$/);
