@@ -8,7 +8,7 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 - Creates 1–50 native quiz polls in the original language, Hindi, English, Hinglish, or a requested language.
 - Supports easy, medium, hard, and mixed difficulty.
 - Uses Gemini structured JSON output, then validates every question against Telegram limits.
-- Uses Telegram's current `InputPollOption` objects and `correct_option_ids` quiz API.
+- Uses Telegram's current `InputPollOption` objects and `correct_option_id` quiz API.
 - Returns the webhook response immediately and finishes generation in the background, reducing Telegram retries during long AI calls.
 - Retries temporary Gemini failures and Telegram `429`/`5xx` responses.
 - Verifies Telegram's secret webhook header.
@@ -19,7 +19,7 @@ A production-ready Node.js Telegram bot that turns pasted text or uploaded PDFs 
 
 - **Node.js 22.x** (LTS), the runtime used by the Render web service.
 - **TypeScript 5.9.3**, compiled to `dist/` by the `build` script.
-- **Gemini `gemini-2.0-flash-lite`**, a fast Gemini Flash-Lite model with free-tier input and output. It supports PDF input, a 1,048,576-token input window, and structured output.
+- **Gemini `gemini-2.5-flash-lite`**, the current stable Flash-Lite model with PDF input, a 1,048,576-token input window, and structured output. (Gemini 2.0 Flash-Lite was shut down on 1 June 2026.)
 - **`@google/genai`**, Google's current JavaScript SDK (not the deprecated `@google/generative-ai` package).
 - **A persistent Node HTTP server** (`src/server.ts`) that exposes the `/webhook` endpoint and a small landing page.
 - **Telegram Bot API** native quiz polls.
@@ -29,7 +29,7 @@ You can change `GEMINI_MODEL` at any time without changing code. Use `/model` in
 Official references:
 
 - [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
-- [Gemini Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-2.0-flash-lite)
+- [Gemini Flash-Lite model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite)
 - [Gemini PDF understanding](https://ai.google.dev/gemini-api/docs/document-processing)
 - [Telegram Bot API — sendPoll](https://core.telegram.org/bots/api#sendpoll)
 - [Render Node.js runtime](https://render.com/docs/node-version)
@@ -98,7 +98,7 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Random secret generated above |
 | `GEMINI_API_KEY` | Yes | Key from AI Studio |
-| `GEMINI_MODEL` | No | Defaults to `gemini-2.0-flash-lite` |
+| `GEMINI_MODEL` | No | Defaults to `gemini-2.5-flash-lite` |
 | `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
 | `MAX_QUIZ_COUNT` | No | Defaults to `50`, max `100` |
 | `MAX_PDF_BYTES` | No | Defaults to `20000000` |

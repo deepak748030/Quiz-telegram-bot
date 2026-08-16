@@ -111,7 +111,11 @@ For a PDF, add <code>/quiz 10 medium Hinglish</code> as its caption.
 /apikey reset — return to the bot’s default key and model
 `.trim();
 
-const safeErrorMessage = (error: unknown, usesPersonalKey = false): string => {
+const safeErrorMessage = (
+  error: unknown,
+  usesPersonalKey = false,
+  wasPdf = false,
+): string => {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
 
@@ -132,7 +136,15 @@ const safeErrorMessage = (error: unknown, usesPersonalKey = false): string => {
   if (normalized.includes("invalid argument") || normalized.includes("not found") || normalized.includes("model not supported")) {
     return "The selected Gemini model is not available or doesn't support quiz generation. Use /model to pick a different one, or check the GEMINI_MODEL environment variable.";
   }
-  return "I couldn’t create this quiz. Please try a clearer source or a smaller PDF.";
+  if (normalized.includes("json") || normalized.includes("empty response") || normalized.includes("did not return any valid")) {
+    return "Gemini did not return usable quiz questions after 3 attempts. Please retry once; if it continues, choose another model with /model.";
+  }
+  if (normalized.includes("fetch") || normalized.includes("timeout") || normalized.includes("network")) {
+    return "The AI service could not be reached. Please wait a moment and try again.";
+  }
+  return wasPdf
+    ? "I couldn’t create a quiz from this PDF. Check that it opens normally and is not password-protected, then try /model if the problem continues."
+    : "I couldn’t create this quiz. Please retry once or choose another model with /model.";
 };
 
 const logError = (context: string, error: unknown): void => {
@@ -526,7 +538,11 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     const usesPersonalKey = message.from
       ? Boolean(getUserAISettings(message.from.id).apiKey)
       : false;
-    const userMessage = safeErrorMessage(error, usesPersonalKey);
+    const userMessage = safeErrorMessage(
+      error,
+      usesPersonalKey,
+      Boolean(message.document),
+    );
     try {
       await telegram.editMessage(
         message.chat.id,

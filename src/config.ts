@@ -31,6 +31,14 @@ const required = (name: string): string => {
   return value;
 };
 
+const configuredGeminiModel = (): string => {
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash-lite";
+  // Keep old Render deployments working after Google's 1 June 2026 shutdown.
+  return /^gemini-2\.0-flash(?:-lite)?(?:-001)?$/i.test(model)
+    ? "gemini-2.5-flash-lite"
+    : model;
+};
+
 export const getConfig = (): AppConfig => {
   const webhookSecret = required("TELEGRAM_WEBHOOK_SECRET");
   if (!/^[A-Za-z0-9_-]{1,256}$/.test(webhookSecret)) {
@@ -51,7 +59,7 @@ export const getConfig = (): AppConfig => {
     telegramToken: required("TELEGRAM_BOT_TOKEN"),
     webhookSecret,
     geminiApiKey: required("GEMINI_API_KEY"),
-    geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash-lite",
+    geminiModel: configuredGeminiModel(),
     defaultQuizCount,
     maxQuizCount,
     maxPdfBytes: readInteger(
@@ -68,5 +76,5 @@ export const configurationStatus = () => ({
   telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
   webhookSecret: Boolean(process.env.TELEGRAM_WEBHOOK_SECRET?.trim()),
   gemini: Boolean(process.env.GEMINI_API_KEY?.trim()),
-  model: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash-lite",
+  model: configuredGeminiModel(),
 });
