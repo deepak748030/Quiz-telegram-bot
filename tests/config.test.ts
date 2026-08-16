@@ -19,13 +19,31 @@ describe("quiz count configuration", () => {
     expect(config.maxQuizCount).toBe(50);
   });
 
+  it("defaults to the current stable Gemini model when GEMINI_MODEL is unset", () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-token");
+    vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "test-secret");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_MODEL", "");
+
+    expect(getConfig().geminiModel).toBe("gemini-2.5-flash");
+  });
+
   it("migrates the retired Gemini 2.0 default used by old deployments", () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-token");
     vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "test-secret");
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     vi.stubEnv("GEMINI_MODEL", "gemini-2.0-flash-lite");
 
-    expect(getConfig().geminiModel).toBe("gemini-2.5-flash-lite");
+    expect(getConfig().geminiModel).toBe("gemini-2.5-flash");
+  });
+
+  it("migrates the removed gemini-2.5-flash-lite model used by old deployments", () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "test-token");
+    vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "test-secret");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GEMINI_MODEL", "gemini-2.5-flash-lite");
+
+    expect(getConfig().geminiModel).toBe("gemini-2.5-flash");
   });
 
   it("allows MAX_QUIZ_COUNT up to 100 but rejects values above it", () => {
