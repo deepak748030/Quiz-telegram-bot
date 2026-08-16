@@ -1,0 +1,21 @@
+# Render Blueprint — optional. You can also configure these manually in the
+# Render dashboard. See README "Deploy to Render".
+services:
+  - type: web
+    name: quiz-telegram-bot
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /webhook
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      # Create these three in the Render dashboard (Dashboard > Service > Environment)
+      # so secrets are never committed:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
