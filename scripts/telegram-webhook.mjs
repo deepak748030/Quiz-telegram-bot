@@ -53,7 +53,7 @@ try {
     await api("setWebhook", {
       url,
       secret_token: secret,
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "callback_query"],
       max_connections: 40,
       drop_pending_updates: args.includes("--drop"),
     });
@@ -62,7 +62,8 @@ try {
         { command: "start", description: "Start the quiz bot" },
         { command: "quiz", description: "Create a custom quiz" },
         { command: "help", description: "Show examples and limits" },
-        { command: "model", description: "Show the configured AI model" },
+        { command: "model", description: "Choose your Gemini AI model" },
+        { command: "apikey", description: "Add or change your Gemini API key" },
       ],
     });
     console.log(`✓ Webhook set to ${url}`);

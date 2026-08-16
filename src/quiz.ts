@@ -102,12 +102,12 @@ export const parseQuizInput = (
       }
       sawCount = true;
       const requestedCount = Number(token);
-      if (requestedCount < 3 || requestedCount > maxCount) {
+      if (requestedCount < 1 || requestedCount > maxCount) {
         return {
           isQuizCommand: true,
           options: defaults,
           sourceText: remainingLines.join("\n").trim(),
-          error: `Question count must be between 3 and ${maxCount}.`,
+          error: `Question count must be between 1 and ${maxCount}.`,
         };
       }
       count = requestedCount;
