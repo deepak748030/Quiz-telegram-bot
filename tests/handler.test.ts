@@ -187,16 +187,14 @@ describe("handleUpdate — tappable HTML commands in the model menu", () => {
     text,
   });
 
-  it("renders a tappable /use_N command for every model", async () => {
+  it("keeps the message body free of /use_N and /model_N command text", async () => {
     await handleUpdate({ update_id: 1, message: userMessage("/model") });
 
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
-    // Telegram turns each /use_N into a bot_command entity, which is tappable
-    // in every client and needs only `message` updates to work.
-    expect(text).toContain("/use_1");
-    expect(text).toContain("gemini-a");
-    expect(text).toContain("/use_3");
-    expect(text).toContain("gemini-c");
+    // The buttons are the whole selection UI; no raw command is advertised.
+    expect(text).not.toMatch(/\/use_\d+/);
+    expect(text).not.toMatch(/\/model_\d+/);
+    expect(text).toContain("Tap a model to switch:");
   });
 
   it("selects a model when the user taps /use_2", async () => {
@@ -226,9 +224,14 @@ describe("handleUpdate — tappable HTML commands in the model menu", () => {
 
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
     expect(text).toContain("Page 2/2");
-    // Page 2 starts at catalogue index 10, so its first command is /use_11.
-    expect(text).toContain("/use_11");
-    expect(text).toContain("gemini-10");
+    // Page 2 starts at catalogue index 10; its first button shows the model
+    // name and sends /use_11 — nothing command-shaped in the body.
+    expect(text).not.toContain("/use_11");
+    const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+    };
+    expect(markup.replyMarkup.inline_keyboard[0]?.[0]?.text).toBe("gemini-10");
+    expect(markup.replyMarkup.inline_keyboard[0]?.[0]?.callback_data).toBe("/use_11");
   });
 
   it("rejects an out-of-range /use_N instead of silently doing nothing", async () => {
@@ -314,6 +317,7 @@ describe("handleUpdate — inline buttons execute the real /use_N commands", () 
       replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
     };
     const nextButton = markup.replyMarkup.inline_keyboard.at(-1)?.[0];
+    expect(nextButton?.text).toBe("➡️ Next page");
     expect(nextButton?.callback_data).toBe("/model_2");
     telegramMocks.sendMessage.mockClear();
 
@@ -329,7 +333,7 @@ describe("handleUpdate — inline buttons execute the real /use_N commands", () 
 
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
     expect(text).toContain("Page 2/2");
-    expect(text).toContain("/use_11");
+    expect(text).not.toMatch(/\/use_\d+/);
   });
 
   it("still honours legacy token buttons left on screen from old deployments", async () => {
@@ -407,7 +411,9 @@ describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () =
 
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
     expect(text).toContain("Page 3/3");
-    expect(text).toContain("Previous page: /model_2");
+    // No raw commands anywhere in the visible message.
+    expect(text).not.toMatch(/\/use_\d+/);
+    expect(text).not.toMatch(/\/model_\d+/);
 
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
       replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
@@ -421,8 +427,26 @@ describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () =
       expect(rows[index]?.[0]?.text).toBe(model);
       expect(rows[index]?.[0]?.callback_data).toBe(command);
     }
-    expect(rows[8]?.[0]?.text).toBe("⬅️ Page 2");
+    expect(rows[8]?.[0]?.text).toBe("⬅️ Previous page");
     expect(rows[8]?.[0]?.callback_data).toBe("/model_2");
+  });
+
+  it("routes a bare 'use_21' callback payload to the same /use_21 logic", async () => {
+    await handleUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, is_bot: false, first_name: "User" },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+        data: "use_21",
+      },
+    });
+
+    expect(getUserAISettings(99).model).toBe("gemini-3.6-flash");
+    expect(telegramMocks.answerCallbackQuery).toHaveBeenCalledWith(
+      "cb1",
+      "✅ Selected gemini-3.6-flash",
+    );
   });
 
   for (const [command, expectedModel] of Object.entries(expectedByCommand)) {

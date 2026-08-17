@@ -40,35 +40,31 @@ const clampPage = (requestedPage: number, pageCount: number): number =>
   Math.min(Math.max(0, Number.isFinite(requestedPage) ? requestedPage : 0), pageCount - 1);
 
 /**
- * Renders the model picker.
+ * Renders the model picker: a short HTML header plus a fully button-based
+ * inline keyboard (`InlineKeyboardMarkup` / `InlineKeyboardButton`).
  *
- * Every model is offered twice, on purpose:
+ * The keyboard is the entire selection UI, on every page:
  *
- *  1. As a tappable `/use_N` bot command inside the HTML message body.
- *     Telegram turns any `/token` in message text into a `bot_command` entity
- *     that is tappable in every client, and tapping it sends an ordinary
- *     message. That path only needs `message` updates, so it keeps working
- *     even when the deployment's webhook was registered without
- *     `callback_query` in `allowed_updates` — the usual reason inline buttons
- *     appear completely dead.
- *  2. As an inline keyboard button that SHOWS the model's name but CARRIES
- *     that exact same `/use_N` command as its `callback_data`. The visible
- *     label and the sent payload are deliberately different things: the user
- *     reads "gemini-3.6-flash", the tap sends "/use_21". The callback handler
- *     feeds the command through `parseModelCommand` — the identical parser
- *     the typed command uses — so a button tap executes precisely the same,
- *     already-working command path as manually sending `/use_N`. No separate
- *     button-only switching mechanism exists.
+ *  - One button per model. The visible label and the sent payload are
+ *    deliberately different things: the user reads "gemini-3.6-flash", the
+ *    tap sends "/use_21" as `callback_data`. The callback handler feeds that
+ *    command through `parseModelCommand` — the identical parser the typed
+ *    command uses — so a button tap executes precisely the same,
+ *    already-working command path as manually sending `/use_N`. No separate
+ *    button-only switching mechanism exists.
+ *  - "⬅️ Previous page" / "➡️ Next page" buttons whose `callback_data` is
+ *    the existing `/model_N` page command, reusing the same pagination
+ *    logic as typing it.
  *
- * A `ReplyKeyboardMarkup` cannot do this: by Bot API design a reply-keyboard
- * tap sends the button's visible text verbatim, so a button labelled
- * "gemini-3.6-flash" would send "gemini-3.6-flash" — not "/use_21" — and
- * would need a new name-based handler. Inline `callback_data` is Telegram's
- * native mechanism for a label that differs from the payload, which is why
- * the menu uses it.
+ * The message body intentionally contains NO `/use_N` or `/model_N` command
+ * text. Those commands still exist as backend routes — typing `/use_21`
+ * manually keeps working — they are just no longer part of the visible UI.
  *
- * Both routes resolve to the same handler, so the menu behaves identically
- * whichever one the user reaches for.
+ * A `ReplyKeyboardMarkup` could not do this: by Bot API design a
+ * reply-keyboard tap sends the button's visible text verbatim, so a button
+ * labelled "gemini-3.6-flash" would send "gemini-3.6-flash" — not "/use_21".
+ * Inline `callback_data` is Telegram's native mechanism for a label that
+ * differs from the payload, which is why the menu uses it.
  */
 export const buildModelMenu = (
   models: string[],
@@ -95,48 +91,29 @@ export const buildModelMenu = (
     ];
   });
 
-  // Navigation buttons show friendly labels while carrying the working
-  // `/model_N` page commands (1-based) in `callback_data`, mirroring the
-  // "Previous page: /model_N" lines in the message body.
+  // Pagination is button-based too: friendly "Previous/Next page" labels
+  // carrying the working `/model_N` page commands (1-based) as their
+  // `callback_data`, routed through the existing pagination logic.
   const navigation: { text: string; callback_data: string }[] = [];
   if (page > 0) {
-    navigation.push({ text: `⬅️ Page ${page}`, callback_data: `/model_${page}` });
+    navigation.push({ text: "⬅️ Previous page", callback_data: `/model_${page}` });
   }
   if (page + 1 < pageCount) {
-    navigation.push({ text: `Page ${page + 2} ➡️`, callback_data: `/model_${page + 2}` });
+    navigation.push({ text: "➡️ Next page", callback_data: `/model_${page + 2}` });
   }
   if (navigation.length > 0) rows.push(navigation);
 
-  // The body lists model names only — no `/use_N` in front of them — so the
-  // user reads model names everywhere. Typed `/use_N` commands (1-based over
-  // the whole catalogue, matching the button order shown) keep working and
-  // are mentioned once in the fallback footer.
-  const lines = visible.map((model) =>
-    model === selectedModel
-      ? `✅ <b>${escapeHtml(model)}</b> (current)`
-      : `▫️ <b>${escapeHtml(model)}</b>`,
-  );
-
-  const navigationLines: string[] = [];
-  // Pages are 1-based in the command so "/model_2" really is page 2. These
-  // tappable commands are the fallback for clients where inline buttons are
-  // unresponsive.
-  if (page > 0) navigationLines.push(`⬅️ Previous page: /model_${page}`);
-  if (page + 1 < pageCount) navigationLines.push(`➡️ Next page: /model_${page + 2}`);
-
+  // The message body is deliberately minimal: no model list, no `/use_N`
+  // lines, no `/model_N` navigation text. The inline keyboard below it IS
+  // the entire selection UI. Typed `/use_N` and `/model_N` remain working
+  // backend command routes, just no longer advertised here.
   const text = [
     "<b>🤖 Choose your Gemini model</b>",
     "",
     `Current: <code>${escapeHtml(selectedModel)}</code>`,
     `${models.length} model${models.length === 1 ? "" : "s"} available · Page ${page + 1}/${pageCount}`,
     "",
-    "<b>Tap a model button below to switch:</b>",
-    ...lines,
-    ...(navigationLines.length > 0 ? ["", ...navigationLines] : []),
-    "",
-    // Typed-command fallback: the first model on this page is /use_{start+1},
-    // the last is /use_{start+visible.length}, in the order listed above.
-    `Buttons not responding? Type /use_${start + 1} to /use_${start + visible.length} for the models above, in order.`,
+    "<b>Tap a model to switch:</b>",
   ].join("\n");
 
   return { text, markup: { inline_keyboard: rows }, page, pageCount };
@@ -167,6 +144,10 @@ export const parseModelCallback = (
 
   // Command-shaped buttons: reuse the typed-command parser verbatim.
   if (data.startsWith("/")) return parseModelCommand(data, models);
+
+  // Bare command payloads ("use_21", "model_2") route through the exact
+  // same parser — one source of truth for what a command means.
+  if (/^(?:use|models?)_\d+$/.test(data)) return parseModelCommand(`/${data}`, models);
 
   const tokenMatch = data.match(/^m:([A-Za-z0-9_-]+)$/);
   if (tokenMatch) {
