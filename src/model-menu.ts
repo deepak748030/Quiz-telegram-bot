@@ -51,12 +51,21 @@ const clampPage = (requestedPage: number, pageCount: number): number =>
  *     even when the deployment's webhook was registered without
  *     `callback_query` in `allowed_updates` — the usual reason inline buttons
  *     appear completely dead.
- *  2. As an inline keyboard button whose label AND `callback_data` are that
- *     exact same `/use_N` command. The callback handler feeds the command
- *     through `parseModelCommand` — the identical parser the typed command
- *     uses — so a button tap executes precisely the same, already-working
- *     command path as manually sending `/use_N`. No separate button-only
- *     switching mechanism exists.
+ *  2. As an inline keyboard button that SHOWS the model's name but CARRIES
+ *     that exact same `/use_N` command as its `callback_data`. The visible
+ *     label and the sent payload are deliberately different things: the user
+ *     reads "gemini-3.6-flash", the tap sends "/use_21". The callback handler
+ *     feeds the command through `parseModelCommand` — the identical parser
+ *     the typed command uses — so a button tap executes precisely the same,
+ *     already-working command path as manually sending `/use_N`. No separate
+ *     button-only switching mechanism exists.
+ *
+ * A `ReplyKeyboardMarkup` cannot do this: by Bot API design a reply-keyboard
+ * tap sends the button's visible text verbatim, so a button labelled
+ * "gemini-3.6-flash" would send "gemini-3.6-flash" — not "/use_21" — and
+ * would need a new name-based handler. Inline `callback_data` is Telegram's
+ * native mechanism for a label that differs from the payload, which is why
+ * the menu uses it.
  *
  * Both routes resolve to the same handler, so the menu behaves identically
  * whichever one the user reaches for.
@@ -71,41 +80,47 @@ export const buildModelMenu = (
   const start = page * MODEL_PAGE_SIZE;
   const visible = models.slice(start, start + MODEL_PAGE_SIZE);
 
-  // Each button IS the working command: `/use_N` as both the visible label
-  // and the callback payload. `N` is 1-based over the whole catalogue (not
-  // the page), exactly like the typed command.
+  // Visible label = the model's name; sent payload = the working `/use_N`
+  // command. The user never sees "/use_21" on a button — they see
+  // "gemini-3.6-flash" — but tapping it dispatches "/use_21" through the
+  // exact same handler as typing it. `N` is 1-based over the whole catalogue
+  // (not the page), exactly like the typed command.
   const rows = visible.map((model, offset) => {
     const command = `/use_${start + offset + 1}`;
     return [
       {
-        text: `${model === selectedModel ? "✅ " : ""}${command}`,
+        text: `${model === selectedModel ? "✅ " : ""}${model}`,
         callback_data: command,
       },
     ];
   });
 
-  // Navigation buttons carry the working `/model_N` page commands (1-based),
-  // mirroring the "Previous page: /model_N" lines in the message body.
+  // Navigation buttons show friendly labels while carrying the working
+  // `/model_N` page commands (1-based) in `callback_data`, mirroring the
+  // "Previous page: /model_N" lines in the message body.
   const navigation: { text: string; callback_data: string }[] = [];
   if (page > 0) {
-    navigation.push({ text: `⬅️ /model_${page}`, callback_data: `/model_${page}` });
+    navigation.push({ text: `⬅️ Page ${page}`, callback_data: `/model_${page}` });
   }
   if (page + 1 < pageCount) {
-    navigation.push({ text: `/model_${page + 2} ➡️`, callback_data: `/model_${page + 2}` });
+    navigation.push({ text: `Page ${page + 2} ➡️`, callback_data: `/model_${page + 2}` });
   }
   if (navigation.length > 0) rows.push(navigation);
 
-  // `/use_N` is 1-based and indexes the whole catalogue, not the page, so a
-  // command stays valid after the user pages around.
-  const lines = visible.map((model, offset) => {
-    const number = start + offset + 1;
-    return model === selectedModel
-      ? `✅ /use_${number} — <b>${escapeHtml(model)}</b> (current)`
-      : `▫️ /use_${number} — <b>${escapeHtml(model)}</b>`;
-  });
+  // The body lists model names only — no `/use_N` in front of them — so the
+  // user reads model names everywhere. Typed `/use_N` commands (1-based over
+  // the whole catalogue, matching the button order shown) keep working and
+  // are mentioned once in the fallback footer.
+  const lines = visible.map((model) =>
+    model === selectedModel
+      ? `✅ <b>${escapeHtml(model)}</b> (current)`
+      : `▫️ <b>${escapeHtml(model)}</b>`,
+  );
 
   const navigationLines: string[] = [];
-  // Pages are 1-based in the command so "/model_2" really is page 2.
+  // Pages are 1-based in the command so "/model_2" really is page 2. These
+  // tappable commands are the fallback for clients where inline buttons are
+  // unresponsive.
   if (page > 0) navigationLines.push(`⬅️ Previous page: /model_${page}`);
   if (page + 1 < pageCount) navigationLines.push(`➡️ Next page: /model_${page + 2}`);
 
@@ -115,9 +130,13 @@ export const buildModelMenu = (
     `Current: <code>${escapeHtml(selectedModel)}</code>`,
     `${models.length} model${models.length === 1 ? "" : "s"} available · Page ${page + 1}/${pageCount}`,
     "",
-    "<b>Tap a command to switch model:</b>",
+    "<b>Tap a model button below to switch:</b>",
     ...lines,
     ...(navigationLines.length > 0 ? ["", ...navigationLines] : []),
+    "",
+    // Typed-command fallback: the first model on this page is /use_{start+1},
+    // the last is /use_{start+visible.length}, in the order listed above.
+    `Buttons not responding? Type /use_${start + 1} to /use_${start + visible.length} for the models above, in order.`,
   ].join("\n");
 
   return { text, markup: { inline_keyboard: rows }, page, pageCount };
