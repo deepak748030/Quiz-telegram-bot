@@ -95,7 +95,7 @@ For a PDF, add <code>/quiz 10 medium Hinglish</code> as its caption.
 “auto” keeps the source language. Every poll has 4 choices, one correct answer, and a short explanation.
 
 <b>Personal Gemini settings</b>
-/model — see and select all models available to your key. Tap a model button, or tap the <code>/use_1</code>-style command next to it if buttons don’t respond in your client.
+/model — browse every model available to your key and tap a model button to switch.
 /apikey YOUR_KEY — use or change your own key (private chat only)
 /apikey reset — return to the bot’s default key and model
 `.trim();
