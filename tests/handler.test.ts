@@ -109,11 +109,12 @@ describe("handleUpdate — model menu callbacks", () => {
       "cb1",
       "✅ Selected gemini-b",
     );
-    // The rebuilt menu should mark gemini-b as the selected model.
+    // The rebuilt menu should mark gemini-b's command button as selected.
     const markup = telegramMocks.editMessage.mock.calls[0]?.[4] as {
       inline_keyboard: { text: string; callback_data: string }[][];
     };
-    expect(markup.inline_keyboard[1]?.[0]?.text).toBe("✅ gemini-b");
+    expect(markup.inline_keyboard[1]?.[0]?.text).toBe("✅ /use_2");
+    expect(markup.inline_keyboard[1]?.[0]?.callback_data).toBe("/use_2");
     // And cache the catalogue so the next click does not need another fetch.
     expect(getUserAISettings(99).availableModels).toEqual([
       "gemini-a",
@@ -169,8 +170,9 @@ describe("handleUpdate — model menu callbacks", () => {
     const markup = telegramMocks.editMessage.mock.calls[0]?.[4] as {
       inline_keyboard: { text: string; callback_data: string }[][];
     };
-    // Page 2 starts at index 10 -> "gemini-10".
-    expect(markup.inline_keyboard[0]?.[0]?.text).toBe("gemini-10");
+    // Page 2 starts at catalogue index 10 -> command "/use_11".
+    expect(markup.inline_keyboard[0]?.[0]?.text).toBe("/use_11");
+    expect(markup.inline_keyboard[0]?.[0]?.callback_data).toBe("/use_11");
   });
 });
 
@@ -253,23 +255,33 @@ describe("handleUpdate — tappable HTML commands in the model menu", () => {
   });
 });
 
-describe("handleUpdate — inline buttons stay bound to their model", () => {
-  it("selects by content token, not by list position", async () => {
+describe("handleUpdate — inline buttons execute the real /use_N commands", () => {
+  it("labels every button with its working /use_N command", async () => {
+    await handleUpdate({ update_id: 1, message: userSetup() });
+    const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+    };
+    const rows = markup.replyMarkup.inline_keyboard;
+    expect(rows[0]?.[0]?.text).toBe("/use_1");
+    expect(rows[0]?.[0]?.callback_data).toBe("/use_1");
+    expect(rows[1]?.[0]?.text).toBe("/use_2");
+    expect(rows[2]?.[0]?.callback_data).toBe("/use_3");
+    // No button shows only a bare model name anymore.
+    for (const row of rows) {
+      for (const button of row) {
+        expect(button.text).toMatch(/\/(?:use|model)_\d+/);
+      }
+    }
+  });
+
+  it("runs a tapped /use_N through the same path as the typed command", async () => {
     await handleUpdate({ update_id: 1, message: userSetup() });
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
       replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
     };
     const button = markup.replyMarkup.inline_keyboard[1]?.[0];
-    expect(button?.text).toBe("gemini-b");
-
-    // The catalogue shifts underneath the on-screen keyboard.
-    geminiMocks.listGeminiModels.mockResolvedValue([
-      "gemini-0-new",
-      "gemini-a",
-      "gemini-b",
-      "gemini-c",
-    ]);
-    clearAllUserAISettings();
+    expect(button?.callback_data).toBe("/use_2");
+    telegramMocks.sendMessage.mockClear();
 
     await handleUpdate({
       update_id: 2,
@@ -281,7 +293,52 @@ describe("handleUpdate — inline buttons stay bound to their model", () => {
       },
     });
 
-    // An index-based button would have selected "gemini-a" here.
+    // Same result and same confirmation the typed /use_2 command produces.
+    expect(getUserAISettings(99).model).toBe("gemini-b");
+    expect(telegramMocks.answerCallbackQuery).toHaveBeenCalledWith("cb1");
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Model set to");
+    expect(text).toContain("gemini-b");
+  });
+
+  it("pages via the navigation button's /model_N command", async () => {
+    const many = Array.from({ length: 15 }, (_, index) => `gemini-${index}`);
+    geminiMocks.listGeminiModels.mockResolvedValue(many);
+    await handleUpdate({ update_id: 1, message: userSetup() });
+    const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+    };
+    const nextButton = markup.replyMarkup.inline_keyboard.at(-1)?.[0];
+    expect(nextButton?.callback_data).toBe("/model_2");
+    telegramMocks.sendMessage.mockClear();
+
+    await handleUpdate({
+      update_id: 2,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, is_bot: false, first_name: "User" },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+        data: nextButton!.callback_data,
+      },
+    });
+
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Page 2/2");
+    expect(text).toContain("/use_11");
+  });
+
+  it("still honours legacy token buttons left on screen from old deployments", async () => {
+    const { modelToken } = await import("../src/model-menu.js");
+    await handleUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, is_bot: false, first_name: "User" },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+        data: `m:${modelToken("gemini-b")}`,
+      },
+    });
+
     expect(getUserAISettings(99).model).toBe("gemini-b");
   });
 
@@ -302,6 +359,96 @@ describe("handleUpdate — inline buttons stay bound to their model", () => {
       true,
     );
   });
+});
+
+describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () => {
+  // The exact page-3 models from the production catalogue, at catalogue
+  // indices 20-27 so their commands are /use_21…/use_28.
+  const page3Models = [
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-omni-flash-preview",
+    "gemini-pro-latest",
+    "gemini-robotics-er-1.6-preview",
+    "gemini-robotics-er-2-preview",
+  ];
+  const catalogue = [
+    ...Array.from({ length: 20 }, (_, index) => `gemini-model-${index + 1}`),
+    ...page3Models,
+  ];
+
+  const expectedByCommand: Record<string, string> = {
+    "/use_21": "gemini-3.6-flash",
+    "/use_22": "gemini-3.7-flash",
+    "/use_23": "gemini-flash-latest",
+    "/use_24": "gemini-flash-lite-latest",
+    "/use_25": "gemini-omni-flash-preview",
+    "/use_26": "gemini-pro-latest",
+    "/use_27": "gemini-robotics-er-1.6-preview",
+    "/use_28": "gemini-robotics-er-2-preview",
+  };
+
+  beforeEach(() => {
+    geminiMocks.listGeminiModels.mockResolvedValue(catalogue);
+  });
+
+  it("renders /use_21…/use_28 command buttons and a /model_2 previous-page button", async () => {
+    await handleUpdate({
+      update_id: 1,
+      message: { ...userSetup(), text: "/model_3" },
+    });
+
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Page 3/3");
+    expect(text).toContain("Previous page: /model_2");
+
+    const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+    };
+    const rows = markup.replyMarkup.inline_keyboard;
+    // 8 command buttons + 1 navigation row.
+    expect(rows).toHaveLength(9);
+    for (const [index, command] of Object.keys(expectedByCommand).entries()) {
+      expect(rows[index]?.[0]?.text).toBe(command);
+      expect(rows[index]?.[0]?.callback_data).toBe(command);
+    }
+    expect(rows[8]?.[0]?.text).toBe("⬅️ /model_2");
+    expect(rows[8]?.[0]?.callback_data).toBe("/model_2");
+  });
+
+  for (const [command, expectedModel] of Object.entries(expectedByCommand)) {
+    it(`tapping ${command} selects ${expectedModel}, exactly like typing it`, async () => {
+      // Tap the button.
+      await handleUpdate({
+        update_id: 1,
+        callback_query: {
+          id: "cb1",
+          from: { id: 99, is_bot: false, first_name: "User" },
+          message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+          data: command,
+        },
+      });
+      expect(getUserAISettings(99).model).toBe(expectedModel);
+      const tappedReply = telegramMocks.sendMessage.mock.calls.at(-1)?.[1] as string;
+      expect(tappedReply).toContain("Model set to");
+      expect(tappedReply).toContain(expectedModel);
+
+      // Typing the same command still works and produces the same reply.
+      clearAllUserAISettings();
+      geminiMocks.listGeminiModels.mockResolvedValue(catalogue);
+      telegramMocks.sendMessage.mockClear();
+      await handleUpdate({
+        update_id: 2,
+        message: { ...userSetup(), text: command },
+      });
+      expect(getUserAISettings(99).model).toBe(expectedModel);
+      const typedReply = telegramMocks.sendMessage.mock.calls.at(-1)?.[1] as string;
+      expect(typedReply).toContain("Model set to");
+      expect(typedReply).toContain(expectedModel);
+    });
+  }
 });
 
 const userSetup = () => ({
