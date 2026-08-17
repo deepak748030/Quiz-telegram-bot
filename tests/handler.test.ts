@@ -110,12 +110,14 @@ describe("handleUpdate — model menu callbacks", () => {
       "✅ Selected gemini-b",
     );
     // The rebuilt menu should mark gemini-b's button as selected. The label
-    // shows the model name; the payload stays the working /use_2 command.
+    // shows the model name; the button deep-links to its use_2 payload.
     const markup = telegramMocks.editMessage.mock.calls[0]?.[4] as {
-      inline_keyboard: { text: string; callback_data: string }[][];
+      inline_keyboard: { text: string; url: string }[][];
     };
     expect(markup.inline_keyboard[1]?.[0]?.text).toBe("✅ gemini-b");
-    expect(markup.inline_keyboard[1]?.[0]?.callback_data).toBe("/use_2");
+    expect(markup.inline_keyboard[1]?.[0]?.url).toBe(
+      "https://t.me/ForgeQuizBot?start=use_2",
+    );
     // And cache the catalogue so the next click does not need another fetch.
     expect(getUserAISettings(99).availableModels).toEqual([
       "gemini-a",
@@ -169,12 +171,14 @@ describe("handleUpdate — model menu callbacks", () => {
     const text = telegramMocks.editMessage.mock.calls[0]?.[2] as string;
     expect(text).toContain("Page 2/2");
     const markup = telegramMocks.editMessage.mock.calls[0]?.[4] as {
-      inline_keyboard: { text: string; callback_data: string }[][];
+      inline_keyboard: { text: string; url: string }[][];
     };
-    // Page 2 starts at catalogue index 10 -> model "gemini-10" shown, but
-    // the payload is its command "/use_11".
+    // Page 2 starts at catalogue index 10 -> model "gemini-10" shown, and the
+    // button deep-links to its use_11 payload.
     expect(markup.inline_keyboard[0]?.[0]?.text).toBe("gemini-10");
-    expect(markup.inline_keyboard[0]?.[0]?.callback_data).toBe("/use_11");
+    expect(markup.inline_keyboard[0]?.[0]?.url).toBe(
+      "https://t.me/ForgeQuizBot?start=use_11",
+    );
   });
 });
 
@@ -228,10 +232,12 @@ describe("handleUpdate — tappable HTML commands in the model menu", () => {
     // name and sends /use_11 — nothing command-shaped in the body.
     expect(text).not.toContain("/use_11");
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
-      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup: { inline_keyboard: { text: string; url: string }[][] };
     };
     expect(markup.replyMarkup.inline_keyboard[0]?.[0]?.text).toBe("gemini-10");
-    expect(markup.replyMarkup.inline_keyboard[0]?.[0]?.callback_data).toBe("/use_11");
+    expect(markup.replyMarkup.inline_keyboard[0]?.[0]?.url).toBe(
+      "https://t.me/ForgeQuizBot?start=use_11",
+    );
   });
 
   it("rejects an out-of-range /use_N instead of silently doing nothing", async () => {
@@ -261,19 +267,20 @@ describe("handleUpdate — tappable HTML commands in the model menu", () => {
 });
 
 describe("handleUpdate — inline buttons execute the real /use_N commands", () => {
-  it("shows the model name on every button while sending its /use_N command", async () => {
+  it("shows the model name on every button while deep-linking its use_N payload", async () => {
     await handleUpdate({ update_id: 1, message: userSetup() });
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
-      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup: { inline_keyboard: { text: string; url: string }[][] };
     };
     const rows = markup.replyMarkup.inline_keyboard;
-    // Visible text is the model name; the payload is the working command.
+    // Visible text is the model name; the URL deep-links to the working
+    // payload so the button also supports long-press → copy/open.
     expect(rows[0]?.[0]?.text).toBe("gemini-a");
-    expect(rows[0]?.[0]?.callback_data).toBe("/use_1");
+    expect(rows[0]?.[0]?.url).toBe("https://t.me/ForgeQuizBot?start=use_1");
     expect(rows[1]?.[0]?.text).toBe("gemini-b");
-    expect(rows[1]?.[0]?.callback_data).toBe("/use_2");
+    expect(rows[1]?.[0]?.url).toBe("https://t.me/ForgeQuizBot?start=use_2");
     expect(rows[2]?.[0]?.text).toBe("gemini-c");
-    expect(rows[2]?.[0]?.callback_data).toBe("/use_3");
+    expect(rows[2]?.[0]?.url).toBe("https://t.me/ForgeQuizBot?start=use_3");
     // No model button surfaces a raw /use_N command to the user.
     for (const row of rows) {
       for (const button of row) {
@@ -282,53 +289,44 @@ describe("handleUpdate — inline buttons execute the real /use_N commands", () 
     }
   });
 
-  it("runs a tapped /use_N through the same path as the typed command", async () => {
+  it("runs a tapped /use_N deep link through the same path as the typed command", async () => {
     await handleUpdate({ update_id: 1, message: userSetup() });
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
-      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup: { inline_keyboard: { text: string; url: string }[][] };
     };
     const button = markup.replyMarkup.inline_keyboard[1]?.[0];
-    expect(button?.callback_data).toBe("/use_2");
+    expect(button?.url).toBe("https://t.me/ForgeQuizBot?start=use_2");
     telegramMocks.sendMessage.mockClear();
 
+    // Telegram delivers a `?start=use_2` deep link as the message "/start use_2".
     await handleUpdate({
       update_id: 2,
-      callback_query: {
-        id: "cb1",
-        from: { id: 99, is_bot: false, first_name: "User" },
-        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
-        data: button!.callback_data,
-      },
+      message: { ...userSetup(), text: "/start use_2" },
     });
 
     // Same result and same confirmation the typed /use_2 command produces.
     expect(getUserAISettings(99).model).toBe("gemini-b");
-    expect(telegramMocks.answerCallbackQuery).toHaveBeenCalledWith("cb1");
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
     expect(text).toContain("Model set to");
     expect(text).toContain("gemini-b");
   });
 
-  it("pages via the navigation button's /model_N command", async () => {
+  it("pages via the navigation button's model_N deep link", async () => {
     const many = Array.from({ length: 15 }, (_, index) => `gemini-${index}`);
     geminiMocks.listGeminiModels.mockResolvedValue(many);
     await handleUpdate({ update_id: 1, message: userSetup() });
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
-      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup: { inline_keyboard: { text: string; url: string }[][] };
     };
     const nextButton = markup.replyMarkup.inline_keyboard.at(-1)?.[0];
     expect(nextButton?.text).toBe("➡️ Next page");
-    expect(nextButton?.callback_data).toBe("/model_2");
+    expect(nextButton?.url).toBe("https://t.me/ForgeQuizBot?start=model_2");
     telegramMocks.sendMessage.mockClear();
 
+    // Telegram delivers the `?start=model_2` deep link as "/start model_2".
     await handleUpdate({
       update_id: 2,
-      callback_query: {
-        id: "cb1",
-        from: { id: 99, is_bot: false, first_name: "User" },
-        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
-        data: nextButton!.callback_data,
-      },
+      message: { ...userSetup(), text: "/start model_2" },
     });
 
     const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
@@ -403,7 +401,7 @@ describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () =
     geminiMocks.listGeminiModels.mockResolvedValue(catalogue);
   });
 
-  it("labels page-3 buttons with model names while sending /use_21…/use_28", async () => {
+  it("labels page-3 buttons with model names while deep-linking use_21…use_28", async () => {
     await handleUpdate({
       update_id: 1,
       message: { ...userSetup(), text: "/model_3" },
@@ -416,19 +414,21 @@ describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () =
     expect(text).not.toMatch(/\/model_\d+/);
 
     const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
-      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup: { inline_keyboard: { text: string; url: string }[][] };
     };
     const rows = markup.replyMarkup.inline_keyboard;
     // 8 model buttons + 1 navigation row.
     expect(rows).toHaveLength(9);
-    // The exact required mapping: visible text = model name, sent payload =
-    // the corresponding existing /use_N command.
+    // The exact required mapping: visible text = model name, URL deep-links to
+    // the corresponding use_N payload.
     for (const [index, [command, model]] of Object.entries(expectedByCommand).entries()) {
       expect(rows[index]?.[0]?.text).toBe(model);
-      expect(rows[index]?.[0]?.callback_data).toBe(command);
+      expect(rows[index]?.[0]?.url).toBe(
+        `https://t.me/ForgeQuizBot?start=${command.slice(1)}`,
+      );
     }
     expect(rows[8]?.[0]?.text).toBe("⬅️ Previous page");
-    expect(rows[8]?.[0]?.callback_data).toBe("/model_2");
+    expect(rows[8]?.[0]?.url).toBe("https://t.me/ForgeQuizBot?start=model_2");
   });
 
   it("routes a bare 'use_21' callback payload to the same /use_21 logic", async () => {
@@ -451,15 +451,10 @@ describe("handleUpdate — 28-model catalogue, page 3 (/use_21…/use_28)", () =
 
   for (const [command, expectedModel] of Object.entries(expectedByCommand)) {
     it(`tapping ${command} selects ${expectedModel}, exactly like typing it`, async () => {
-      // Tap the button.
+      // Tapping the URL button delivers the payload as "/start use_N".
       await handleUpdate({
         update_id: 1,
-        callback_query: {
-          id: "cb1",
-          from: { id: 99, is_bot: false, first_name: "User" },
-          message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
-          data: command,
-        },
+        message: { ...userSetup(), text: `/start ${command.slice(1)}` },
       });
       expect(getUserAISettings(99).model).toBe(expectedModel);
       const tappedReply = telegramMocks.sendMessage.mock.calls.at(-1)?.[1] as string;
@@ -609,6 +604,23 @@ describe("handleUpdate — URL buttons on key messages", () => {
   it("attaches the same URL button to the /help message", async () => {
     await handleUpdate({ update_id: 1, message: privateMessage("/help") });
 
+    const options = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; url?: string }[][] };
+    };
+    expect(options.replyMarkup.inline_keyboard[0]?.[0]?.url).toBe(
+      "https://t.me/ForgeQuizBot",
+    );
+  });
+
+  it("still shows the welcome for an unknown /start payload", async () => {
+    await handleUpdate({
+      update_id: 1,
+      message: privateMessage("/start some-random-token"),
+    });
+
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Hi");
+    // The URL button is still attached to the welcome.
     const options = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
       replyMarkup: { inline_keyboard: { text: string; url?: string }[][] };
     };

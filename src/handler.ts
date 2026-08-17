@@ -392,7 +392,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       }
 
       const selectedModel = getUserAISettings(callback.from.id).model ?? config.geminiModel;
-      const menu = buildModelMenu(models, selectedModel, page);
+      const menu = buildModelMenu(models, selectedModel, page, config.botUrl);
       try {
         await telegram.editMessage(
           callbackMessage.chat.id,
@@ -431,6 +431,20 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
   const command = commandName(text);
 
   if (command === "/start") {
+    // Model-menu URL buttons deep-link here as `?start=use_N` / `?start=model_N`;
+    // Telegram delivers them as `/start use_N`. Route the payload through the
+    // same model-menu command path so a button tap switches the model exactly
+    // like typing the command — even though the button is a URL (long-press →
+    // copy/open), not a callback button.
+    const payload = text.trim().split(/\s+/)[1];
+    if (payload && isModelMenuCommand(`/${payload}`)) {
+      await handleUpdate({
+        update_id: update.update_id,
+        message: { ...message, text: `/${payload}` },
+      });
+      return;
+    }
+
     await telegram.sendMessage(
       message.chat.id,
       startText(
@@ -502,7 +516,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       setUserApiKey(message.from!.id, argument);
       setUserModel(message.from!.id, selectedModel);
       setAvailableModels(message.from!.id, models);
-      const menu = buildModelMenu(models, selectedModel, 0);
+      const menu = buildModelMenu(models, selectedModel, 0, config.botUrl);
       await telegram.sendMessage(
         message.chat.id,
         `✅ <b>Your Gemini key is active.</b> It will be used for your quizzes.\n\n${menu.text}`,
@@ -572,7 +586,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     }
 
     const selectedModel = getUserAISettings(userId).model ?? config.geminiModel;
-    const menu = buildModelMenu(models, selectedModel, page);
+    const menu = buildModelMenu(models, selectedModel, page, config.botUrl);
     await telegram.sendMessage(message.chat.id, `${confirmation}${menu.text}`, {
       ...replyOptions(message),
       replyMarkup: menu.markup,

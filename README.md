@@ -208,12 +208,9 @@ Commands: `/start`, `/help`, `/quiz [1-100] [easy|medium|hard|mixed] [language]`
 
 In a **private chat** with the bot, send `/apikey YOUR_KEY`. The bot immediately tries to delete the secret-bearing message, validates the key, and uses that key only for that Telegram user. Send `/model` to load every Gemini model available to the active key. Send `/apikey reset` to return to the bot owner’s default key and model.
 
-The model picker offers **two equivalent ways to select a model**, so it keeps working even where one of them fails:
+The model picker's buttons are **URL buttons** carrying a `?start=` deep link to the bot (`https://t.me/YourBot?start=use_7`). URL buttons are the only kind that let you **long-press** a button to copy/open its link. Tapping one opens the bot with a Start button that sends the payload as `/start use_7`; the `/start` handler routes it through the exact same parser as a typed `/use_7`, so a tap and a typed command behave identically. `use_N` payloads select a model (1-based over the whole catalogue), and `model_N` payloads page the list.
 
-- **Inline buttons** — one tap, handled through `callback_query` updates.
-- **Tappable `/use_N` commands** rendered in the message body (`/use_1`, `/use_2`, …). Telegram parses any `/token` in message text into a `bot_command` entity that is tappable in every client, and tapping it sends an ordinary message. This path needs only `message` updates, so it still works when `callback_query` updates aren't reaching the bot. `/model_2` pages the list the same way.
-
-Buttons carry a short **content hash** of the model name (`m:<token>`) rather than its position in the list. The catalogue is refetched on every cold start and Google adds and removes models over time, so a position-based button could drift onto the wrong model or point past the end of a shorter list — the latter made taps appear to do nothing. Buttons from older deployments (`model:<index>`) are still accepted so keyboards already sitting in chats keep working after a redeploy.
+Typed commands still work too — `/use_7`, `/model_2`, and `/model` remain backend routes — and they arrive as ordinary `message` updates, so they keep working even if `callback_query` updates aren't reaching the bot. Buttons from older callback-based deployments (`m:<token>`, `model:<index>`, `/use_N`) are still accepted so keyboards already sitting in chats keep working after a redeploy.
 
 Personal settings are deliberately held only in process memory: they are not written to disk or logs, and reset when the service restarts or redeploys. Telegram may retain messages if deletion fails, so use only a private chat and revoke a key in Google AI Studio if it was exposed.
 
@@ -263,15 +260,13 @@ Telegram requires a public HTTPS webhook, so use a secure tunnel only for local 
 
 ### Model buttons do nothing when tapped
 
-Run `npm run webhook:info`. If the reported `allowed_updates` does not include `callback_query`, Telegram is **dropping every button tap before it reaches the bot** — the most common cause of dead buttons. Re-register the webhook:
+The model-menu buttons are URL buttons (`?start=` deep links), so a tap is handled by the Telegram client itself: it opens the bot and, after you press Start, sends `/start use_N`. If the model still doesn't change after that, the bot isn't receiving message updates:
 
-```bash
-npm run webhook:set -- https://your-service.onrender.com
-```
+1. Open `/webhook` and confirm all three `configured` values are `true`.
+2. Run `npm run webhook:info` and check `last_error_message` and `pending_update_count`.
+3. Re-register the webhook: `npm run webhook:set -- https://your-service.onrender.com`.
 
-`webhook:set` always registers `["message", "callback_query"]`, and `webhook:info` now warns about this explicitly. Until the webhook is fixed, the `/use_1`-style commands in the `/model` menu still work, because they arrive as ordinary `message` updates.
-
-Also check the service logs for `Callback query ... failed`. Every callback is answered even on an unknown or stale button, so a button should never leave a spinner hanging.
+Buttons from older deployments were callback buttons, which need `callback_query` in `allowed_updates`; `webhook:set` always registers `["message", "callback_query"]`, so those keep working too. Also check the service logs for `Callback query ... failed`. Every callback is answered even on an unknown or stale button, so a button should never leave a spinner hanging.
 
 ### Render build fails
 
