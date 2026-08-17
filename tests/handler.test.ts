@@ -582,3 +582,64 @@ describe("handleUpdate — PDF quiz errors surface the real cause", () => {
     expect(failureText).not.toContain("test-gemini-key");
   });
 });
+
+describe("handleUpdate — URL buttons on key messages", () => {
+  const privateMessage = (text: string) => ({
+    message_id: 30,
+    from: { id: 99, is_bot: false, first_name: "User" },
+    chat: { id: 1, type: "private" as const },
+    date: 0,
+    text,
+  });
+
+  it("attaches a URL button (not callback_data) to the /start welcome", async () => {
+    await handleUpdate({ update_id: 1, message: privateMessage("/start") });
+
+    const options = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; url?: string; callback_data?: string }[][] };
+    };
+    const button = options.replyMarkup.inline_keyboard[0]?.[0];
+    expect(button?.text).toBe("🚀 Open Bot");
+    // URL buttons open the link in Telegram itself, so they work even when
+    // callback_query webhook updates are not enabled.
+    expect(button?.url).toBe("https://t.me/ForgeQuizBot");
+    expect(button?.callback_data).toBeUndefined();
+  });
+
+  it("attaches the same URL button to the /help message", async () => {
+    await handleUpdate({ update_id: 1, message: privateMessage("/help") });
+
+    const options = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; url?: string }[][] };
+    };
+    expect(options.replyMarkup.inline_keyboard[0]?.[0]?.url).toBe(
+      "https://t.me/ForgeQuizBot",
+    );
+  });
+
+  it("adds the URL button to the final quiz-ready message", async () => {
+    geminiMocks.generate.mockResolvedValue({
+      title: "Test quiz",
+      quizzes: [
+        {
+          question: "Q?",
+          options: ["A", "B", "C", "D"],
+          correctOption: 0,
+          explanation: "Because.",
+        },
+      ],
+    });
+
+    await handleUpdate({
+      update_id: 1,
+      message: privateMessage("Some study material that is long enough to quiz."),
+    });
+
+    const markup = telegramMocks.editMessage.mock.calls
+      .map((call) => call[4])
+      .find((m) => m !== undefined) as
+      | { inline_keyboard: { text: string; url?: string }[][] }
+      | undefined;
+    expect(markup?.inline_keyboard[0]?.[0]?.url).toBe("https://t.me/ForgeQuizBot");
+  });
+});

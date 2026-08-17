@@ -103,6 +103,7 @@ This project is a **web service** (a long-lived HTTP server), not a serverless f
 | `TELEGRAM_WEBHOOK_SECRET` | Yes | Random secret generated above |
 | `GEMINI_API_KEY` | Yes | Key from AI Studio |
 | `GEMINI_MODEL` | No | Defaults to `gemini-2.5-flash` |
+| `BOT_URL` | No | Defaults to `https://t.me/ForgeQuizBot`; shown on URL buttons in `/start`, `/help`, and the quiz-ready message |
 | `DEFAULT_QUIZ_COUNT` | No | Defaults to `8` for study material; pre-written question sets are counted automatically |
 | `MAX_QUIZ_COUNT` | No | Defaults to `50`, max `100` |
 | `MAX_PDF_BYTES` | No | Defaults to `20000000` (Telegram's download ceiling) |
