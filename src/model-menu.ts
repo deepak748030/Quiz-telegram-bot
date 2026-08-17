@@ -51,8 +51,12 @@ const clampPage = (requestedPage: number, pageCount: number): number =>
  *     even when the deployment's webhook was registered without
  *     `callback_query` in `allowed_updates` — the usual reason inline buttons
  *     appear completely dead.
- *  2. As an inline keyboard button, which stays the nicer one-tap experience
- *     when callback updates are delivered normally.
+ *  2. As an inline keyboard button whose label AND `callback_data` are that
+ *     exact same `/use_N` command. The callback handler feeds the command
+ *     through `parseModelCommand` — the identical parser the typed command
+ *     uses — so a button tap executes precisely the same, already-working
+ *     command path as manually sending `/use_N`. No separate button-only
+ *     switching mechanism exists.
  *
  * Both routes resolve to the same handler, so the menu behaves identically
  * whichever one the user reaches for.
@@ -67,16 +71,28 @@ export const buildModelMenu = (
   const start = page * MODEL_PAGE_SIZE;
   const visible = models.slice(start, start + MODEL_PAGE_SIZE);
 
-  const rows = visible.map((model) => [
-    {
-      text: `${model === selectedModel ? "✅ " : ""}${model}`,
-      callback_data: `m:${modelToken(model)}`,
-    },
-  ]);
+  // Each button IS the working command: `/use_N` as both the visible label
+  // and the callback payload. `N` is 1-based over the whole catalogue (not
+  // the page), exactly like the typed command.
+  const rows = visible.map((model, offset) => {
+    const command = `/use_${start + offset + 1}`;
+    return [
+      {
+        text: `${model === selectedModel ? "✅ " : ""}${command}`,
+        callback_data: command,
+      },
+    ];
+  });
 
+  // Navigation buttons carry the working `/model_N` page commands (1-based),
+  // mirroring the "Previous page: /model_N" lines in the message body.
   const navigation: { text: string; callback_data: string }[] = [];
-  if (page > 0) navigation.push({ text: "⬅️ Previous", callback_data: `p:${page - 1}` });
-  if (page + 1 < pageCount) navigation.push({ text: "Next ➡️", callback_data: `p:${page + 1}` });
+  if (page > 0) {
+    navigation.push({ text: `⬅️ /model_${page}`, callback_data: `/model_${page}` });
+  }
+  if (page + 1 < pageCount) {
+    navigation.push({ text: `/model_${page + 2} ➡️`, callback_data: `/model_${page + 2}` });
+  }
   if (navigation.length > 0) rows.push(navigation);
 
   // `/use_N` is 1-based and indexes the whole catalogue, not the page, so a
@@ -115,15 +131,23 @@ export type ModelAction =
 /**
  * Resolves `callback_data` from a tapped inline button.
  *
- * Buttons rendered by older deployments (`model:<index>` / `models:<page>`)
- * are still accepted so keyboards already sitting in users' chats keep
- * working after a redeploy instead of going dead.
+ * Current buttons carry the literal `/use_N` / `/model_N` command, which is
+ * handed to `parseModelCommand` — the exact parser used when the user types
+ * the command — so a button tap and a typed command run the same logic.
+ *
+ * Buttons rendered by older deployments (`m:<token>`, `p:<page>`,
+ * `model:<index>`, `models:<page>`) are still accepted so keyboards already
+ * sitting in users' chats keep working after a redeploy instead of going
+ * dead.
  */
 export const parseModelCallback = (
   data: string | undefined,
   models: string[],
 ): ModelAction => {
   if (!data) return { kind: "unknown" };
+
+  // Command-shaped buttons: reuse the typed-command parser verbatim.
+  if (data.startsWith("/")) return parseModelCommand(data, models);
 
   const tokenMatch = data.match(/^m:([A-Za-z0-9_-]+)$/);
   if (tokenMatch) {

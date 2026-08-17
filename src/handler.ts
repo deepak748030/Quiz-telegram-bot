@@ -323,6 +323,30 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
         return;
       }
 
+      // Current menu buttons carry the literal `/use_N` / `/model_N` command
+      // as their callback_data. A tap must behave exactly as if the user had
+      // typed that command, so acknowledge the tap and re-dispatch the update
+      // as a plain command message from the tapping user. This funnels the
+      // button through the identical, already-working command branch below —
+      // same parser, same model-switching logic, same confirmation reply.
+      if (callback.data && /^\/(?:use|model)_\d+$/.test(callback.data)) {
+        await telegram.answerCallbackQuery(callback.id);
+        await handleUpdate({
+          update_id: update.update_id,
+          message: {
+            message_id: callbackMessage.message_id,
+            ...(callbackMessage.message_thread_id
+              ? { message_thread_id: callbackMessage.message_thread_id }
+              : {}),
+            from: callback.from,
+            chat: callbackMessage.chat,
+            date: callbackMessage.date,
+            text: callback.data,
+          },
+        });
+        return;
+      }
+
       const models = await loadModels(callback.from.id, config.geminiApiKey);
       if (!models) {
         await telegram.answerCallbackQuery(
