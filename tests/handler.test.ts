@@ -107,7 +107,7 @@ describe("handleUpdate — model menu callbacks", () => {
     expect(geminiMocks.listGeminiModels).toHaveBeenCalledTimes(1);
     expect(telegramMocks.answerCallbackQuery).toHaveBeenCalledWith(
       "cb1",
-      "Selected gemini-b",
+      "✅ Selected gemini-b",
     );
     // The rebuilt menu should mark gemini-b as the selected model.
     const markup = telegramMocks.editMessage.mock.calls[0]?.[4] as {
@@ -172,6 +172,144 @@ describe("handleUpdate — model menu callbacks", () => {
     // Page 2 starts at index 10 -> "gemini-10".
     expect(markup.inline_keyboard[0]?.[0]?.text).toBe("gemini-10");
   });
+});
+
+describe("handleUpdate — tappable HTML commands in the model menu", () => {
+  const userMessage = (text: string, messageId = 20) => ({
+    message_id: messageId,
+    from: { id: 99, is_bot: false, first_name: "User" },
+    chat: { id: 1, type: "private" as const },
+    date: 0,
+    text,
+  });
+
+  it("renders a tappable /use_N command for every model", async () => {
+    await handleUpdate({ update_id: 1, message: userMessage("/model") });
+
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    // Telegram turns each /use_N into a bot_command entity, which is tappable
+    // in every client and needs only `message` updates to work.
+    expect(text).toContain("/use_1");
+    expect(text).toContain("gemini-a");
+    expect(text).toContain("/use_3");
+    expect(text).toContain("gemini-c");
+  });
+
+  it("selects a model when the user taps /use_2", async () => {
+    await handleUpdate({ update_id: 1, message: userMessage("/use_2") });
+
+    expect(getUserAISettings(99).model).toBe("gemini-b");
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Model set to");
+    expect(text).toContain("gemini-b");
+  });
+
+  it("strips a trailing @BotName so group taps still select the model", async () => {
+    // Telegram appends @BotName when a command is tapped in a group chat.
+    await handleUpdate({ update_id: 1, message: userMessage("/use_3@QuizBot") });
+
+    expect(getUserAISettings(99).model).toBe("gemini-c");
+  });
+
+  it("pages through the list with /model_2", async () => {
+    const many = Array.from({ length: 15 }, (_, index) => `gemini-${index}`);
+    geminiMocks.listGeminiModels.mockResolvedValue(many);
+    // Prime the cache so /model_2 reuses the list the menu was rendered from.
+    await handleUpdate({ update_id: 1, message: userMessage("/model") });
+    telegramMocks.sendMessage.mockClear();
+
+    await handleUpdate({ update_id: 2, message: userMessage("/model_2") });
+
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("Page 2/2");
+    // Page 2 starts at catalogue index 10, so its first command is /use_11.
+    expect(text).toContain("/use_11");
+    expect(text).toContain("gemini-10");
+  });
+
+  it("rejects an out-of-range /use_N instead of silently doing nothing", async () => {
+    await handleUpdate({ update_id: 1, message: userMessage("/use_99") });
+
+    expect(getUserAISettings(99).model).toBeUndefined();
+    const text = telegramMocks.sendMessage.mock.calls[0]?.[1] as string;
+    expect(text).toContain("no longer valid");
+  });
+
+  it("keeps /use_N bound to the model shown even after the catalogue grows", async () => {
+    // The menu was rendered from this list...
+    await handleUpdate({ update_id: 1, message: userMessage("/model") });
+    // ...and Google adds a model that sorts first before the user taps.
+    geminiMocks.listGeminiModels.mockResolvedValue([
+      "gemini-0-new",
+      "gemini-a",
+      "gemini-b",
+      "gemini-c",
+    ]);
+
+    await handleUpdate({ update_id: 2, message: userMessage("/use_2") });
+
+    // Still the model the user actually saw next to /use_2.
+    expect(getUserAISettings(99).model).toBe("gemini-b");
+  });
+});
+
+describe("handleUpdate — inline buttons stay bound to their model", () => {
+  it("selects by content token, not by list position", async () => {
+    await handleUpdate({ update_id: 1, message: userSetup() });
+    const markup = telegramMocks.sendMessage.mock.calls[0]?.[2] as {
+      replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] };
+    };
+    const button = markup.replyMarkup.inline_keyboard[1]?.[0];
+    expect(button?.text).toBe("gemini-b");
+
+    // The catalogue shifts underneath the on-screen keyboard.
+    geminiMocks.listGeminiModels.mockResolvedValue([
+      "gemini-0-new",
+      "gemini-a",
+      "gemini-b",
+      "gemini-c",
+    ]);
+    clearAllUserAISettings();
+
+    await handleUpdate({
+      update_id: 2,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, is_bot: false, first_name: "User" },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+        data: button!.callback_data,
+      },
+    });
+
+    // An index-based button would have selected "gemini-a" here.
+    expect(getUserAISettings(99).model).toBe("gemini-b");
+  });
+
+  it("always answers an unrecognised callback so the spinner stops", async () => {
+    await handleUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "cb1",
+        from: { id: 99, is_bot: false, first_name: "User" },
+        message: { message_id: 5, chat: { id: 1, type: "private" }, date: 0 },
+        data: "m:deadbeef00",
+      },
+    });
+
+    expect(telegramMocks.answerCallbackQuery).toHaveBeenCalledWith(
+      "cb1",
+      expect.stringContaining("no longer available"),
+      true,
+    );
+  });
+});
+
+const userSetup = () => ({
+  message_id: 20,
+  from: { id: 99, is_bot: false, first_name: "User" },
+  chat: { id: 1, type: "private" as const },
+  date: 0,
+  text: "/model",
 });
 
 describe("handleUpdate — PDF quiz errors surface the real cause", () => {
