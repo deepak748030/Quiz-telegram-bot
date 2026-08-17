@@ -5,6 +5,8 @@ export interface AppConfig {
   webhookSecret: string;
   geminiApiKey: string;
   geminiModel: string;
+  /** Public t.me link for the bot, used by URL buttons (e.g. /start, /help). */
+  botUrl: string;
   defaultQuizCount: number;
   maxQuizCount: number;
   maxPdfBytes: number;
@@ -64,6 +66,7 @@ export const getConfig = (): AppConfig => {
     webhookSecret,
     geminiApiKey: required("GEMINI_API_KEY"),
     geminiModel: configuredGeminiModel(),
+    botUrl: process.env.BOT_URL?.trim() || "https://t.me/ForgeQuizBot",
     defaultQuizCount,
     maxQuizCount,
     maxPdfBytes: readInteger(

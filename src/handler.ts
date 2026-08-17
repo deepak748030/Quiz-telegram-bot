@@ -22,6 +22,7 @@ import {
 import type {
   QuizRequestOptions,
   QuizSource,
+  TelegramInlineKeyboardMarkup,
   TelegramMessage,
   TelegramUpdate,
 } from "./types.js";
@@ -248,6 +249,16 @@ const replyOptions = (message: TelegramMessage) => ({
     : {}),
 });
 
+/**
+ * Inline keyboard with a single URL button that opens the bot's public t.me
+ * link. Unlike `callback_data` buttons (which depend on `callback_query`
+ * webhook updates), URL buttons are handled by Telegram clients themselves, so
+ * they always do something when tapped.
+ */
+const botLinkMarkup = (botUrl: string): TelegramInlineKeyboardMarkup => ({
+  inline_keyboard: [[{ text: "🚀 Open Bot", url: botUrl }]],
+});
+
 const sendHelpForEmptyQuiz = async (
   telegram: TelegramClient,
   message: TelegramMessage,
@@ -381,7 +392,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       }
 
       const selectedModel = getUserAISettings(callback.from.id).model ?? config.geminiModel;
-      const menu = buildModelMenu(models, selectedModel, page);
+      const menu = buildModelMenu(models, selectedModel, page, config.botUrl);
       try {
         await telegram.editMessage(
           callbackMessage.chat.id,
@@ -420,6 +431,20 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
   const command = commandName(text);
 
   if (command === "/start") {
+    // Model-menu URL buttons deep-link here as `?start=use_N` / `?start=model_N`;
+    // Telegram delivers them as `/start use_N`. Route the payload through the
+    // same model-menu command path so a button tap switches the model exactly
+    // like typing the command — even though the button is a URL (long-press →
+    // copy/open), not a callback button.
+    const payload = text.trim().split(/\s+/)[1];
+    if (payload && isModelMenuCommand(`/${payload}`)) {
+      await handleUpdate({
+        update_id: update.update_id,
+        message: { ...message, text: `/${payload}` },
+      });
+      return;
+    }
+
     await telegram.sendMessage(
       message.chat.id,
       startText(
@@ -427,7 +452,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
         config.defaultQuizCount,
         config.maxQuizCount,
       ),
-      replyOptions(message),
+      { ...replyOptions(message), replyMarkup: botLinkMarkup(config.botUrl) },
     );
     return;
   }
@@ -436,7 +461,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     await telegram.sendMessage(
       message.chat.id,
       helpText(config.maxQuizCount, config.maxPdfBytes),
-      replyOptions(message),
+      { ...replyOptions(message), replyMarkup: botLinkMarkup(config.botUrl) },
     );
     return;
   }
@@ -491,7 +516,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       setUserApiKey(message.from!.id, argument);
       setUserModel(message.from!.id, selectedModel);
       setAvailableModels(message.from!.id, models);
-      const menu = buildModelMenu(models, selectedModel, 0);
+      const menu = buildModelMenu(models, selectedModel, 0, config.botUrl);
       await telegram.sendMessage(
         message.chat.id,
         `✅ <b>Your Gemini key is active.</b> It will be used for your quizzes.\n\n${menu.text}`,
@@ -561,7 +586,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     }
 
     const selectedModel = getUserAISettings(userId).model ?? config.geminiModel;
-    const menu = buildModelMenu(models, selectedModel, page);
+    const menu = buildModelMenu(models, selectedModel, page, config.botUrl);
     await telegram.sendMessage(message.chat.id, `${confirmation}${menu.text}`, {
       ...replyOptions(message),
       replyMarkup: menu.markup,
@@ -724,6 +749,8 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       message.chat.id,
       status.message_id,
       `🎉 <b>${escapeHtml(quizSet.title)}</b>\n${quizSet.quizzes.length} quiz questions are ready. Tap an option to answer!`,
+      "HTML",
+      botLinkMarkup(config.botUrl),
     );
   } catch (error) {
     logError(`Update ${update.update_id} failed:`, error);

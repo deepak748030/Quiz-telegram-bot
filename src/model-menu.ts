@@ -40,66 +40,71 @@ const clampPage = (requestedPage: number, pageCount: number): number =>
   Math.min(Math.max(0, Number.isFinite(requestedPage) ? requestedPage : 0), pageCount - 1);
 
 /**
+ * Builds a `?start=` deep link to the bot for an inline URL button.
+ *
+ * Telegram delivers the payload as `/start <payload>`; the `/start` handler
+ * routes it into the model menu. Payloads here are short (`use_7`, `model_2`),
+ * well inside Telegram's 64-character `start` parameter limit.
+ */
+export const botDeepLink = (botUrl: string, payload: string): string =>
+  `${botUrl}${botUrl.includes("?") ? "&" : "?"}start=${payload}`;
+
+/**
  * Renders the model picker: a short HTML header plus a fully button-based
  * inline keyboard (`InlineKeyboardMarkup` / `InlineKeyboardButton`).
  *
- * The keyboard is the entire selection UI, on every page:
+ * Every button is a Telegram *URL* button carrying a `?start=` deep link to
+ * the bot (e.g. `https://t.me/ForgeQuizBot?start=use_7`). URL buttons are the
+ * only kind that let the user long-press a button to copy/open its link, which
+ * is why the menu uses them instead of `callback_data` buttons. Tapping one
+ * opens the bot with a Start button that sends the payload as `/start use_7`;
+ * the `/start` handler routes that payload through `parseModelCommand` — the
+ * identical parser a typed `/use_7` uses — so a button tap and a typed command
+ * run exactly the same logic.
  *
- *  - One button per model. The visible label and the sent payload are
- *    deliberately different things: the user reads "gemini-3.6-flash", the
- *    tap sends "/use_21" as `callback_data`. The callback handler feeds that
- *    command through `parseModelCommand` — the identical parser the typed
- *    command uses — so a button tap executes precisely the same,
- *    already-working command path as manually sending `/use_N`. No separate
- *    button-only switching mechanism exists.
- *  - "⬅️ Previous page" / "➡️ Next page" buttons whose `callback_data` is
- *    the existing `/model_N` page command, reusing the same pagination
- *    logic as typing it.
+ * The visible label and the sent payload are deliberately different things:
+ * the user reads "gemini-3.6-flash", the tap sends `use_21`. "⬅️ Previous
+ * page" / "➡️ Next page" carry `model_N` payloads and reuse the same
+ * pagination logic as typing `/model_N`.
  *
  * The message body intentionally contains NO `/use_N` or `/model_N` command
  * text. Those commands still exist as backend routes — typing `/use_21`
  * manually keeps working — they are just no longer part of the visible UI.
- *
- * A `ReplyKeyboardMarkup` could not do this: by Bot API design a
- * reply-keyboard tap sends the button's visible text verbatim, so a button
- * labelled "gemini-3.6-flash" would send "gemini-3.6-flash" — not "/use_21".
- * Inline `callback_data` is Telegram's native mechanism for a label that
- * differs from the payload, which is why the menu uses it.
  */
 export const buildModelMenu = (
   models: string[],
   selectedModel: string,
   requestedPage: number,
+  botUrl: string,
 ): ModelMenu => {
   const pageCount = pageCountFor(models.length);
   const page = clampPage(requestedPage, pageCount);
   const start = page * MODEL_PAGE_SIZE;
   const visible = models.slice(start, start + MODEL_PAGE_SIZE);
 
-  // Visible label = the model's name; sent payload = the working `/use_N`
-  // command. The user never sees "/use_21" on a button — they see
-  // "gemini-3.6-flash" — but tapping it dispatches "/use_21" through the
-  // exact same handler as typing it. `N` is 1-based over the whole catalogue
-  // (not the page), exactly like the typed command.
+  // Visible label = the model's name; the URL deep-links to `use_N`, which the
+  // `/start` handler feeds through the same parser as a typed `/use_N`. `N` is
+  // 1-based over the whole catalogue (not the page), exactly like the typed
+  // command.
   const rows = visible.map((model, offset) => {
-    const command = `/use_${start + offset + 1}`;
+    const payload = `use_${start + offset + 1}`;
     return [
       {
         text: `${model === selectedModel ? "✅ " : ""}${model}`,
-        callback_data: command,
+        url: botDeepLink(botUrl, payload),
       },
     ];
   });
 
   // Pagination is button-based too: friendly "Previous/Next page" labels
-  // carrying the working `/model_N` page commands (1-based) as their
-  // `callback_data`, routed through the existing pagination logic.
-  const navigation: { text: string; callback_data: string }[] = [];
+  // carrying the working `model_N` page commands (1-based) as deep-link
+  // payloads, routed through the existing pagination logic.
+  const navigation: { text: string; url: string }[] = [];
   if (page > 0) {
-    navigation.push({ text: "⬅️ Previous page", callback_data: `/model_${page}` });
+    navigation.push({ text: "⬅️ Previous page", url: botDeepLink(botUrl, `model_${page}`) });
   }
   if (page + 1 < pageCount) {
-    navigation.push({ text: "➡️ Next page", callback_data: `/model_${page + 2}` });
+    navigation.push({ text: "➡️ Next page", url: botDeepLink(botUrl, `model_${page + 2}`) });
   }
   if (navigation.length > 0) rows.push(navigation);
 
