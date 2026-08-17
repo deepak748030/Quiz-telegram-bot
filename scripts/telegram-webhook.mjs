@@ -66,11 +66,37 @@ try {
         { command: "apikey", description: "Add or change your Gemini API key" },
       ],
     });
+    // The bot's own webhook filter is set above, but a *group* bot with
+    // BotFather privacy mode ON only receives commands addressed to it. The
+    // model menu's /use_N commands are ordinary commands, so they arrive
+    // fine; this note just makes the requirement explicit for operators.
+    console.log("✓ Inline buttons and /use_N commands enabled (callback_query allowed)");
     console.log(`✓ Webhook set to ${url}`);
     console.log("✓ Bot commands updated");
   } else if (action === "info") {
     const info = await api("getWebhookInfo");
     console.log(JSON.stringify(info, null, 2));
+
+    // `allowed_updates` is a *filter*: a webhook registered without
+    // "callback_query" makes Telegram drop every inline-button tap before it
+    // ever reaches the bot, so the buttons look completely dead while normal
+    // messages keep working. Surface that instead of leaving it to guesswork.
+    const allowed = info.allowed_updates;
+    if (Array.isArray(allowed) && !allowed.includes("callback_query")) {
+      console.warn(
+        "\n⚠ This webhook does NOT receive callback_query updates, so inline buttons cannot work.\n" +
+          `  Currently allowed: ${allowed.join(", ") || "(none)"}\n` +
+          "  Fix it with: npm run webhook:set -- https://your-service.onrender.com",
+      );
+    }
+    if (!info.url) {
+      console.warn("\n⚠ No webhook URL is set. The bot is not receiving any updates.");
+    }
+    if (info.last_error_message) {
+      console.warn(
+        `\n⚠ Telegram's last delivery attempt failed: ${info.last_error_message}`,
+      );
+    }
   } else if (action === "delete") {
     await api("deleteWebhook", {
       drop_pending_updates: args.includes("--drop"),

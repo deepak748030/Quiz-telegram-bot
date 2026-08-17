@@ -1,5 +1,13 @@
 import { getConfig } from "./config.js";
 import { GeminiQuizGenerator, listGeminiModels } from "./gemini.js";
+import {
+  buildModelMenu,
+  escapeHtml,
+  isModelMenuCommand,
+  pageOfModel,
+  parseModelCallback,
+  parseModelCommand,
+} from "./model-menu.js";
 import { extractPdfText, PdfExtractionError } from "./pdf.js";
 import { parsePastedQuiz, parseQuizInput } from "./quiz.js";
 import { delay, formatBytes, TelegramClient } from "./telegram.js";
@@ -14,17 +22,22 @@ import {
 import type {
   QuizRequestOptions,
   QuizSource,
-  TelegramInlineKeyboardMarkup,
   TelegramMessage,
   TelegramUpdate,
 } from "./types.js";
 
-const escapeHtml = (value: string): string =>
-  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-
+/**
+ * Extracts the leading bot command from a message.
+ *
+ * `_` and digits are part of the match on purpose: the model picker renders
+ * tappable `/use_3` and `/model_2` commands, and a name pattern of `/[a-z]+`
+ * would truncate those to `/use` and `/model`, so the tap would be answered by
+ * the wrong branch. A trailing `@BotName` (added by Telegram when a command is
+ * tapped in a group) is stripped.
+ */
 const commandName = (text: string): string | undefined => {
   const first = text.trim().split(/\s+/, 1)[0]?.toLowerCase();
-  return first?.match(/^\/[a-z]+/)?.[0];
+  return first?.match(/^\/[a-z][a-z0-9_]*/)?.[0];
 };
 
 const isPdf = (message: TelegramMessage): boolean => {
@@ -39,31 +52,6 @@ const isPdf = (message: TelegramMessage): boolean => {
 const hasPdfSignature = (bytes: Uint8Array): boolean => {
   const header = new TextDecoder("ascii").decode(bytes.slice(0, 1_024));
   return header.includes("%PDF-");
-};
-
-const MODEL_PAGE_SIZE = 10;
-
-const modelMenu = (
-  models: string[],
-  selectedModel: string,
-  requestedPage: number,
-): { text: string; markup: TelegramInlineKeyboardMarkup } => {
-  const pageCount = Math.max(1, Math.ceil(models.length / MODEL_PAGE_SIZE));
-  const page = Math.min(Math.max(0, requestedPage), pageCount - 1);
-  const start = page * MODEL_PAGE_SIZE;
-  const buttons = models.slice(start, start + MODEL_PAGE_SIZE).map((model, offset) => [{
-    text: `${model === selectedModel ? "✅ " : ""}${model}`,
-    callback_data: `model:${start + offset}`,
-  }]);
-  const navigation = [];
-  if (page > 0) navigation.push({ text: "⬅️ Previous", callback_data: `models:${page - 1}` });
-  if (page + 1 < pageCount) navigation.push({ text: "Next ➡️", callback_data: `models:${page + 1}` });
-  if (navigation.length > 0) buttons.push(navigation);
-
-  return {
-    text: `<b>Choose your Gemini model</b>\n\nCurrent: <code>${escapeHtml(selectedModel)}</code>\nAvailable models: ${models.length}\nPage ${page + 1}/${pageCount}\n\nTap any model to use it for your quizzes.`,
-    markup: { inline_keyboard: buttons },
-  };
 };
 
 const apiKeyArgument = (text: string): string | undefined =>
@@ -107,7 +95,7 @@ For a PDF, add <code>/quiz 10 medium Hinglish</code> as its caption.
 “auto” keeps the source language. Every poll has 4 choices, one correct answer, and a short explanation.
 
 <b>Personal Gemini settings</b>
-/model — see and select all models available to your key
+/model — see and select all models available to your key. Tap a model button, or tap the <code>/use_1</code>-style command next to it if buttons don’t respond in your client.
 /apikey YOUR_KEY — use or change your own key (private chat only)
 /apikey reset — return to the bot’s default key and model
 `.trim();
@@ -292,6 +280,32 @@ const getRequest = (
   };
 };
 
+/**
+ * Returns the model catalogue for a user, fetching it when process memory has
+ * none.
+ *
+ * The catalogue lives only in memory, so it disappears on every restart,
+ * redeploy, or cold serverless invocation — while the menu stays on screen in
+ * the user's chat. Rebuilding it on demand is what keeps an old menu working
+ * instead of silently ignoring taps.
+ */
+const loadModels = async (
+  userId: number,
+  fallbackApiKey: string,
+): Promise<string[] | undefined> => {
+  const settings = getUserAISettings(userId);
+  if (settings.availableModels && settings.availableModels.length > 0) {
+    return settings.availableModels;
+  }
+  try {
+    const models = await listGeminiModels(settings.apiKey ?? fallbackApiKey);
+    setAvailableModels(userId, models);
+    return models;
+  } catch {
+    return undefined;
+  }
+};
+
 export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
   const config = getConfig();
   const telegram = new TelegramClient(config.telegramToken);
@@ -300,8 +314,6 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
   if (callback) {
     try {
       const callbackMessage = callback.message;
-      const settings = getUserAISettings(callback.from.id);
-      let models = settings.availableModels;
       if (!callbackMessage) {
         await telegram.answerCallbackQuery(
           callback.id,
@@ -310,49 +322,42 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
         );
         return;
       }
-      // The model catalogue lives only in process memory, so it can disappear
-      // after a restart, a redeploy, or a cold serverless invocation — even
-      // though the inline buttons stay on screen. Rebuild it from the active
-      // key so the buttons (model selection + Next/Previous) keep responding
-      // instead of looking dead. The list is sorted deterministically, so a
-      // button's index still maps to the same model.
-      if (!models || models.length === 0) {
-        const apiKey = settings.apiKey ?? config.geminiApiKey;
-        try {
-          models = await listGeminiModels(apiKey);
-          setAvailableModels(callback.from.id, models);
-        } catch {
-          await telegram.answerCallbackQuery(
-            callback.id,
-            "I couldn't refresh the model list. Send /model to reload it.",
-            true,
-          );
-          return;
-        }
-      }
 
-      const modelMatch = callback.data?.match(/^model:(\d+)$/);
-      const pageMatch = callback.data?.match(/^models:(\d+)$/);
-      let page = pageMatch ? Number(pageMatch[1]) : 0;
-      if (modelMatch) {
-        const index = Number(modelMatch[1]);
-        const model = models[index];
-        if (!model) {
-          await telegram.answerCallbackQuery(callback.id, "That model is no longer available.", true);
-          return;
-        }
-        setUserModel(callback.from.id, model);
-        page = Math.floor(index / MODEL_PAGE_SIZE);
-        await telegram.answerCallbackQuery(callback.id, `Selected ${model}`);
-      } else if (pageMatch) {
-        await telegram.answerCallbackQuery(callback.id);
-      } else {
-        await telegram.answerCallbackQuery(callback.id, "Unknown selection.", true);
+      const models = await loadModels(callback.from.id, config.geminiApiKey);
+      if (!models) {
+        await telegram.answerCallbackQuery(
+          callback.id,
+          "I couldn't refresh the model list. Send /model to reload it.",
+          true,
+        );
         return;
       }
 
+      const action = parseModelCallback(callback.data, models);
+      if (action.kind === "unknown") {
+        // Answering is mandatory: an unanswered callback leaves Telegram's
+        // spinner on the button until it times out, which is exactly what
+        // "the button does nothing" looks like to a user.
+        await telegram.answerCallbackQuery(
+          callback.id,
+          "That option is no longer available. Send /model to reload the list.",
+          true,
+        );
+        return;
+      }
+
+      let page: number;
+      if (action.kind === "select") {
+        setUserModel(callback.from.id, action.model);
+        page = pageOfModel(models, action.model);
+        await telegram.answerCallbackQuery(callback.id, `✅ Selected ${action.model}`);
+      } else {
+        page = action.page;
+        await telegram.answerCallbackQuery(callback.id);
+      }
+
       const selectedModel = getUserAISettings(callback.from.id).model ?? config.geminiModel;
-      const menu = modelMenu(models, selectedModel, page);
+      const menu = buildModelMenu(models, selectedModel, page);
       try {
         await telegram.editMessage(
           callbackMessage.chat.id,
@@ -462,7 +467,7 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
       setUserApiKey(message.from!.id, argument);
       setUserModel(message.from!.id, selectedModel);
       setAvailableModels(message.from!.id, models);
-      const menu = modelMenu(models, selectedModel, 0);
+      const menu = buildModelMenu(models, selectedModel, 0);
       await telegram.sendMessage(
         message.chat.id,
         `✅ <b>Your Gemini key is active.</b> It will be used for your quizzes.\n\n${menu.text}`,
@@ -477,26 +482,66 @@ export const handleUpdate = async (update: TelegramUpdate): Promise<void> => {
     return;
   }
 
-  if (command === "/model") {
+  // `/model`, `/models`, `/model_2` (page) and `/use_7` (selection) all land
+  // here. The paged/selecting variants are the tappable commands rendered in
+  // the menu's HTML body, and they run the same logic as the inline buttons.
+  if (command && isModelMenuCommand(command)) {
     const userId = message.from!.id;
-    const settings = getUserAISettings(userId);
-    const apiKey = settings.apiKey ?? config.geminiApiKey;
-    try {
-      const models = await listGeminiModels(apiKey);
-      setAvailableModels(userId, models);
-      const selectedModel = settings.model ?? config.geminiModel;
-      const menu = modelMenu(models, selectedModel, 0);
-      await telegram.sendMessage(message.chat.id, menu.text, {
-        ...replyOptions(message),
-        replyMarkup: menu.markup,
-      });
-    } catch {
+
+    // `/model` and `/models` always refetch so the catalogue is current;
+    // `/use_N` and `/model_N` reuse the cached list the menu was built from,
+    // so the number the user tapped still refers to the model they saw.
+    const isRefresh = command === "/model" || command === "/models";
+    const models = isRefresh
+      ? await listGeminiModels(
+          getUserAISettings(userId).apiKey ?? config.geminiApiKey,
+        ).then(
+          (fetched) => {
+            setAvailableModels(userId, fetched);
+            return fetched;
+          },
+          () => undefined,
+        )
+      : await loadModels(userId, config.geminiApiKey);
+
+    if (!models) {
       await telegram.sendMessage(
         message.chat.id,
         "❌ I couldn’t load the Gemini model list. If you use a personal key, update it with <code>/apikey YOUR_KEY</code>.",
         replyOptions(message),
       );
+      return;
     }
+
+    const action = isRefresh
+      ? ({ kind: "page", page: 0 } as const)
+      : parseModelCommand(command, models);
+
+    if (action.kind === "unknown") {
+      await telegram.sendMessage(
+        message.chat.id,
+        "⚠️ That model number is no longer valid. Send /model to reload the list.",
+        replyOptions(message),
+      );
+      return;
+    }
+
+    let page: number;
+    let confirmation = "";
+    if (action.kind === "select") {
+      setUserModel(userId, action.model);
+      page = pageOfModel(models, action.model);
+      confirmation = `✅ <b>Model set to <code>${escapeHtml(action.model)}</code></b>\n\n`;
+    } else {
+      page = action.page;
+    }
+
+    const selectedModel = getUserAISettings(userId).model ?? config.geminiModel;
+    const menu = buildModelMenu(models, selectedModel, page);
+    await telegram.sendMessage(message.chat.id, `${confirmation}${menu.text}`, {
+      ...replyOptions(message),
+      replyMarkup: menu.markup,
+    });
     return;
   }
 
